@@ -18,6 +18,8 @@ export function getChamber(provider?: ProviderInterface | AccountInterface): Cha
 
 /**
  * Fetch transaction assets from the chamber contract.
+ * ⚠️ Will show assets even if transaction is spent
+ * ⚠️ Contract has no way of knowing which transaction is spent
  * @param contract chamber contract instance.
  * @param valKey claiming key.
  * @param valTo recipient.
@@ -38,6 +40,8 @@ export async function fetchTxAssets(contract: ChamberTypedContract, valKey: stri
 /**
  * Checks if the transaction exists on the tree in the contract
  * gets tx array from the contract and returns true if tx is found in the leaves
+ * ⚠️ Will show transaction exists even if it is spent
+ * ⚠️ Contract has no way of knowing which transaction is spent
  * @param contract chamber contract instance.
  * @param valKey claiming key.
  * @param valTo recipient.
