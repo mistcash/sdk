@@ -17,7 +17,8 @@
     "@mistcash/crypto": "workspace:*",
     "@mistcash/sdk": "workspace:*",
     "@starknet-react/chains": "^4.0.4",
-    "@starknet-react/core": "^4.0.4"
+    "@starknet-react/core": "^4.0.4",
+    "starknet": "^7.6.4"
   },
   "peerDependencies": {
     "react": ">=18.0.0"
