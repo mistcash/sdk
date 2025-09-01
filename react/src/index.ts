@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { devStr, devVal, Asset, MistClient } from '@mistcash/sdk';
-import { StarknetTypedContract, useContract, useSendTransaction } from '@starknet-react/core';
-import { Call } from 'starknet';
+import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
+import { Call, Contract, ProviderInterface } from "starknet";
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET } from '@mistcash/config';
 import { txSecretHash } from "@mistcash/crypto";
 
 export interface UseMist {
+  chamberAddress: `0x${string}`;
   loadingStatus: LoadingStatus;
   loadingMessage: string;
   connect: () => Promise<void>;
@@ -31,7 +32,9 @@ const loadingStatuses: Record<LoadingStatus, [LoadingStatus, string]> = {
 };
 
 // WIP
-export function useMist(): UseMist {
+export function useMist(provider: ProviderInterface | UseProviderResult, sendTx: UseSendTransactionResult): UseMist {
+  const actualProvider = 'provider' in provider ? provider.provider : provider;
+
   const [[loadingStatus, loadingMessage], _setLoadingMsg] = useState<[LoadingStatus, string]>(loadingStatuses.READY);
   const setLoadingMsg = (status: LoadingStatus) => _setLoadingMsg(loadingStatuses[status]);
 
@@ -42,8 +45,12 @@ export function useMist(): UseMist {
     addr: '2009894490435840142178314390393166646092438090257831307886760648929397478285'
   }));
   const [client] = useState(() => new MistClient());
-  const { contract } = useContract({ abi: CHAMBER_ABI, address: CHAMBER_ADDR_MAINNET });
-  const { send, isPending, error: contractErr } = useSendTransaction({});
+  const contract = new Contract(
+    CHAMBER_ABI,
+    CHAMBER_ADDR_MAINNET,
+    actualProvider,
+  ).typedv2(CHAMBER_ABI);
+  const { send, isPending, error: contractErr } = sendTx;
 
   async function fetchAsset() {
     if (contract) {
@@ -68,6 +75,7 @@ export function useMist(): UseMist {
   const error = `${contractErr || ''}`;
 
   return {
+    chamberAddress: CHAMBER_ADDR_MAINNET,
     loadingStatus,
     loadingMessage,
     connect: () => client.connect(),
