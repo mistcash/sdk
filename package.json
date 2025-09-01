@@ -1,8 +1,12 @@
 {
   "name": "@mistcash/sdk-workspace",
+  "version": "0.1.0-beta",
   "private": true,
   "workspaces": [
-    "./*"
+    "core",
+    "config",
+    "crypto",
+    "react"
   ],
   "scripts": {
     "build": "pnpm -r build",

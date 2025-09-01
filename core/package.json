@@ -1,6 +1,10 @@
 {
   "name": "@mistcash/sdk",
-  "version": "0.1.0",
+  "version": "0.1.0-beta",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "MIST Core SDK",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

@@ -1,6 +1,10 @@
 {
   "name": "@mistcash/crypto",
-  "version": "0.1.0",
+  "version": "0.1.0-beta",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "MIST Cryptographic Operations",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
