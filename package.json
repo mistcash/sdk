@@ -1,6 +1,6 @@
 {
   "name": "@mistcash/sdk-workspace",
-  "version": "0.1.0-beta",
+  "version": "0.1.0-beta.1",
   "private": true,
   "workspaces": [
     "core",
@@ -24,7 +24,7 @@
     "type": "git",
     "url": "git+https://github.com/mistcash/sdk.git"
   },
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/mistcash/sdk/issues"
   },

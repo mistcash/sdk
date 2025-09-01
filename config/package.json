@@ -1,10 +1,18 @@
 {
   "name": "@mistcash/config",
-  "version": "0.1.0-beta",
+  "version": "0.1.0-beta.1",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mistcash/sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mistcash/sdk/issues"
+  },
+  "homepage": "https://github.com/mistcash/sdk#readme",
   "description": "MIST SDK config",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
