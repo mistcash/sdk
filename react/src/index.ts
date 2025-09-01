@@ -46,23 +46,12 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   const contract = getChamber(actualProvider);
   const { send, isPending, error: txError } = sendTx;
 
-  async function fetchAsset() {
-    if (contract) {
-      setLoadingMsg('FINDING_TX');
-      const asset = await contract.read_tx(await txSecretHash(valKey, valTo))
-      let amount = asset.amount;
-      if (typeof amount == 'number') {
-        amount = BigInt(amount);
-
-      } else if (typeof amount != 'bigint') {
-        amount = BigInt(`${amount.low}`);
-      }
-      setAsset({ amount, addr: asset.addr })
-      setLoadingMsg('READY'); // clearing loading message
-      return { amount, addr: asset.addr }
-    } else {
-      throw new Error('Contract not found');
-    }
+  async function fetchAssets() {
+    setLoadingMsg('FINDING_TX');
+    const asset = await fetchTxAssets(contract, valKey, valTo);
+    setAsset(asset)
+    setLoadingMsg('READY'); // clearing loading message
+    return asset
   }
 
   // For accumulating all errors

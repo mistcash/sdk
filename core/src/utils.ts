@@ -16,3 +16,15 @@ export const devStr = (val: string) => devVal(val, '') as string;
 export const devVal = <T,>(val: T, deflt: T | undefined = undefined) => {
 	return typeof window !== 'undefined' && window.localStorage.getItem('devVals') ? val : deflt
 };
+
+export async function fetchTxAssets(contract: ChamberTypedContract, valKey: string, valTo: string): Promise<Asset> {
+	const asset = await contract.read_tx(await txSecretHash(valKey, valTo))
+	let amount = asset.amount;
+	if (typeof amount == 'number') {
+		amount = BigInt(amount);
+
+	} else if (typeof amount != 'bigint') {
+		amount = BigInt(`${amount.low}`);
+	}
+	return { amount, addr: asset.addr }
+}
