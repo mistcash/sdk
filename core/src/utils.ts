@@ -1,12 +1,14 @@
 import { AccountInterface, Contract, ProviderInterface } from 'starknet';
-import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET } from '@mistcash/config';
+import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
+import { txSecretHash } from '@mistcash/crypto';
+import { Asset } from './types';
 
-export function getContract(provider?: ProviderInterface | AccountInterface): Contract {
+export function getChamber(provider?: ProviderInterface | AccountInterface): ChamberTypedContract {
 	return new Contract(
 		CHAMBER_ABI,
 		CHAMBER_ADDR_MAINNET,
 		provider
-	)
+	).typedv2(CHAMBER_ABI)
 }
 
 export const devStr = (val: string) => devVal(val, '') as string;

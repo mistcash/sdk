@@ -1,4 +1,4 @@
-import { Abi } from "starknet";
+import { Abi, TypedContractV2 } from "starknet";
 
 export const CHAMBER_ADDR_MAINNET = '0x063eab2f19523fc8578c66a3ddf248d72094c65154b6dd7680b6e05a64845277';
 
@@ -685,3 +685,5 @@ export const ERC20_ABI = [
 		]
 	}
 ] as const satisfies Abi;
+
+export type ChamberTypedContract = TypedContractV2<typeof CHAMBER_ABI>;
