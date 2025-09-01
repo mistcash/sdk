@@ -1,14 +1,13 @@
-export interface Point {
-  x: bigint;
-  y: bigint;
-}
+import { poseidonHashBN254 } from "garaga";
 
-export function generateKeyPair() {
-  const privateKey = BigInt(Math.floor(Math.random() * 1000000));
-  const publicKey: Point = { x: privateKey * 2n, y: privateKey * 3n };
-  return { privateKey, publicKey };
-}
-
-export function encrypt(message: bigint): string {
-  return message.toString();
+export function txSecretHash(key: string, to: string): bigint {
+  // should use bn245 poseidon hash as used in circom
+  // hash key and recipient to generate tx secret
+  if (key && to) {
+    // both should be non zero
+    return poseidonHashBN254(BigInt(key), BigInt(to));
+  } else {
+    // both should be non zero
+    return BigInt(0);
+  }
 }

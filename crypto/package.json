@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "MIST Cryptographic Operations",
   "main": "dist/index.js",
-  "module": "dist/index.mjs", 
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
@@ -17,5 +17,8 @@
     "jest": "^29.5.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "garaga": "0.18.2"
   }
 }
