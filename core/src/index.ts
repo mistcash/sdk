@@ -1,12 +1,8 @@
 import { generateKeyPair } from '@mistcash/crypto';
 
-export { generateKeyPair } from '@mistcash/crypto';
-
 export class MistClient {
-  constructor() {}
+  constructor() { }
 
-  connect() {
-    const keyPair = generateKeyPair();
-    return keyPair;
+  async connect() {
   }
 }
