@@ -4,7 +4,7 @@ import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } fr
 import { Call, ProviderInterface } from "starknet";
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
 
-export interface UseMist {
+export interface UseMistResult {
   chamberAddress: `0x${string}`;
   loadingStatus: LoadingStatus;
   loadingMessage: string;
@@ -29,7 +29,7 @@ const loadingStatuses: Record<LoadingStatus, [LoadingStatus, string]> = {
   READY: ["READY", ""]
 };
 
-export function useMist(provider: ProviderInterface | UseProviderResult, sendTx: UseSendTransactionResult): UseMist {
+export function useMist(provider: ProviderInterface | UseProviderResult, sendTx: UseSendTransactionResult): UseMistResult {
   const actualProvider = 'provider' in provider ? provider.provider : provider;
 
   const [[loadingStatus, loadingMessage], _setLoadingMsg] = useState<[LoadingStatus, string]>(loadingStatuses.READY);
