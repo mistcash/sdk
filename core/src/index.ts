@@ -6,3 +6,5 @@ export class MistClient {
   async connect() {
   }
 }
+
+export * from './utils';
