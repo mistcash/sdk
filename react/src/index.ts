@@ -20,6 +20,7 @@ export interface UseMist {
   isPending: boolean;
   error: string | null;
   contractErr: Error | null;
+  fetchAsset: () => Promise<Asset>;
 }
 
 type LoadingStatus = "FINDING_TX" | "READY";
@@ -44,6 +45,25 @@ export function useMist(): UseMist {
   const { contract } = useContract({ abi: CHAMBER_ABI, address: CHAMBER_ADDR_MAINNET });
   const { send, isPending, error: contractErr } = useSendTransaction({});
 
+  async function fetchAsset() {
+    if (contract) {
+      setLoadingMsg('FINDING_TX');
+      const asset = await contract.read_tx(await txSecretHash(valKey, valTo))
+      let amount = asset.amount;
+      if (typeof amount == 'number') {
+        amount = BigInt(amount);
+
+      } else if (typeof amount != 'bigint') {
+        amount = BigInt(`${amount.low}`);
+      }
+      setAsset({ amount, addr: asset.addr })
+      setLoadingMsg('READY'); // clearing loading message
+      return { amount, addr: asset.addr }
+    } else {
+      throw new Error('Contract not found');
+    }
+  }
+
   // For accumulating all errors
   const error = `${contractErr || ''}`;
 
@@ -59,5 +79,6 @@ export function useMist(): UseMist {
     isPending,
     error,
     contractErr,
+    fetchAsset
   };
 }
