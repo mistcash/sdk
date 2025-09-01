@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { devStr, devVal, Asset, MistClient, fetchTxAssets, getChamber } from '@mistcash/sdk';
+import { devStr, devVal, Asset, fetchTxAssets, getChamber } from '@mistcash/sdk';
 import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
 import { Call, ProviderInterface } from "starknet";
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
@@ -8,7 +8,6 @@ export interface UseMist {
   chamberAddress: `0x${string}`;
   loadingStatus: LoadingStatus;
   loadingMessage: string;
-  connect: () => Promise<void>;
   valTo: string;
   setTo: (val: string) => void;
   valKey: string;
@@ -42,7 +41,6 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     amount: BigInt('10000000000000000'),
     addr: '2009894490435840142178314390393166646092438090257831307886760648929397478285'
   }));
-  const [client] = useState(() => new MistClient());
   const contract = getChamber(actualProvider);
   const { send, isPending, error: txError } = sendTx;
 
@@ -61,7 +59,6 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     chamberAddress: CHAMBER_ADDR_MAINNET,
     loadingStatus,
     loadingMessage,
-    connect: () => client.connect(),
     valTo, setTo,
     valKey, setKey,
     asset, setAsset,
