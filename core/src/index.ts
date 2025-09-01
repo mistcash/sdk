@@ -8,3 +8,4 @@ export class MistClient {
 }
 
 export * from './utils';
+export * from './types';
