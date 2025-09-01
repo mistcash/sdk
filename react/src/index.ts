@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { devStr, devVal, Asset, MistClient } from '@mistcash/sdk';
+import { devStr, devVal, Asset, MistClient, fetchTxAssets, getChamber } from '@mistcash/sdk';
 import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
-import { Call, Contract, ProviderInterface } from "starknet";
-import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET } from '@mistcash/config';
-import { txSecretHash } from "@mistcash/crypto";
+import { Call, ProviderInterface } from "starknet";
+import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
 
 export interface UseMist {
   chamberAddress: `0x${string}`;
@@ -16,11 +15,11 @@ export interface UseMist {
   setKey: (val: string) => void;
   asset: Asset | undefined;
   setAsset: (asset: Asset | undefined) => void;
-  contract: undefined | StarknetTypedContract<typeof CHAMBER_ABI>;
+  contract: ChamberTypedContract;
   send: (args?: Call[] | undefined) => void;
   isPending: boolean;
   error: string | null;
-  contractErr: Error | null;
+  txError: Error | null;
   fetchAsset: () => Promise<Asset>;
 }
 
@@ -31,7 +30,6 @@ const loadingStatuses: Record<LoadingStatus, [LoadingStatus, string]> = {
   READY: ["READY", ""]
 };
 
-// WIP
 export function useMist(provider: ProviderInterface | UseProviderResult, sendTx: UseSendTransactionResult): UseMist {
   const actualProvider = 'provider' in provider ? provider.provider : provider;
 
@@ -45,12 +43,8 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     addr: '2009894490435840142178314390393166646092438090257831307886760648929397478285'
   }));
   const [client] = useState(() => new MistClient());
-  const contract = new Contract(
-    CHAMBER_ABI,
-    CHAMBER_ADDR_MAINNET,
-    actualProvider,
-  ).typedv2(CHAMBER_ABI);
-  const { send, isPending, error: contractErr } = sendTx;
+  const contract = getChamber(actualProvider);
+  const { send, isPending, error: txError } = sendTx;
 
   async function fetchAsset() {
     if (contract) {
@@ -72,7 +66,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   }
 
   // For accumulating all errors
-  const error = `${contractErr || ''}`;
+  const error = `${txError || ''}`;
 
   return {
     chamberAddress: CHAMBER_ADDR_MAINNET,
@@ -86,7 +80,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     send,
     isPending,
     error,
-    contractErr,
-    fetchAsset
+    txError,
+    fetchAsset: fetchAssets
   };
 }
