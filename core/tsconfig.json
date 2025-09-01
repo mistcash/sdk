@@ -4,9 +4,7 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "references": [
-    {
-      "path": "../config"
-    }
+  "include": [
+    "src/**/*"
   ]
 }

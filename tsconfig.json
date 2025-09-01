@@ -8,7 +8,4 @@
     "skipLibCheck": true,
     "declaration": true,
   },
-  "include": [
-    "src/**/*"
-  ],
 }

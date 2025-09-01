@@ -12,7 +12,9 @@
     "test:watch": "jest --watch",
     "clean": "rm -rf dist"
   },
-  "dependencies": {},
+  "dependencies": {
+    "starknet": "^7.6.4"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "jest": "^29.5.0",
