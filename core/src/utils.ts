@@ -1,6 +1,6 @@
 import { AccountInterface, Contract, ProviderInterface } from 'starknet';
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
-import { txSecretHash } from '@mistcash/crypto';
+import { txSecretHash, hash } from '@mistcash/crypto';
 import { Asset } from './types';
 
 export function getChamber(provider?: ProviderInterface | AccountInterface): ChamberTypedContract {
@@ -28,3 +28,15 @@ export async function fetchTxAssets(contract: ChamberTypedContract, valKey: stri
 	}
 	return { amount, addr: asset.addr }
 }
+
+export async function checkTxExists(contract: ChamberTypedContract, valKey: string, valTo: string, tokenAddr: string, amount: string): Promise<boolean> {
+	return await getTxIndexInTree(contract, valKey, valTo, tokenAddr, amount) !== -1;
+}
+
+export async function getTxIndexInTree(contract: ChamberTypedContract, valKey: string, valTo: string, tokenAddr: string, amount: string): Promise<number> {
+	const leaves = await contract.tx_array() as bigint[];
+	const tx_secret = await txSecretHash(valKey, valTo)
+	const tx_hash = await hash(await hash(tx_secret, BigInt(tokenAddr)), BigInt(amount));
+	return leaves.indexOf(tx_hash);
+}
+
