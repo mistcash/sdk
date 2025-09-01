@@ -2,9 +2,7 @@
   "name": "@mistcash/sdk-workspace",
   "private": true,
   "workspaces": [
-    "core",
-    "crypto",
-    "react"
+    "./*"
   ],
   "scripts": {
     "build": "pnpm -r build",

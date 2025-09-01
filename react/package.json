@@ -1,6 +1,6 @@
 {
   "name": "@mistcash/react",
-  "version": "0.1.0", 
+  "version": "0.1.0",
   "description": "MIST React Components",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -9,11 +9,14 @@
     "build": "tsup src/index.ts --format cjs,esm --dts --external react",
     "dev": "tsup src/index.ts --format cjs,esm --dts --external react --watch",
     "test": "jest",
-    "test:watch": "jest --watch", 
+    "test:watch": "jest --watch",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@mistcash/sdk": "workspace:*"
+    "@mistcash/config": "workspace:*",
+    "@mistcash/sdk": "workspace:*",
+    "@starknet-react/chains": "^4.0.4",
+    "@starknet-react/core": "^4.0.4"
   },
   "peerDependencies": {
     "react": ">=18.0.0"

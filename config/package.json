@@ -1,7 +1,7 @@
 {
   "name": "@mistcash/config",
   "version": "0.1.0",
-  "description": "MIST Core SDK",
+  "description": "MIST SDK config",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -12,9 +12,7 @@
     "test:watch": "jest --watch",
     "clean": "rm -rf dist"
   },
-  "dependencies": {
-    "@mistcash/crypto": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "jest": "^29.5.0",
