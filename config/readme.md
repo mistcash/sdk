@@ -11,7 +11,9 @@ pnpm add @mistcash/config
 ## Usage
 
 ```js
-import { ... } from '@mistcash/config';
+import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
+
+// Do something with the ABIs and other config data
 ```
 
 ## Contributing
