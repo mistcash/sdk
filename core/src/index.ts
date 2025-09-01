@@ -1,9 +1,3 @@
-export class MistClient {
-  constructor() { }
-
-  async connect() {
-  }
-}
-
+export * from './dev';
 export * from './utils';
 export * from './types';
