@@ -50,6 +50,16 @@ export async function fetchTxAssets(contract: ChamberTypedContract, valKey: stri
  * @returns True if the transaction exists, false otherwise.
  */
 export async function checkTxExists(contract: ChamberTypedContract, valKey: string, valTo: string, tokenAddr: string, amount: string): Promise<boolean> {
+
+	// fetch existing transactions
+	const allTransactions = await contract.tx_array();
+
+	// generate full transaction hash
+	const tx = await txHash(valKey, valTo, tokenAddr, amount)
+
+	// check if your transaction is in the list
+	allTransactions.indexOf(tx);
+
 	return await getTxIndexInTree(await contract.tx_array() as bigint[], valKey, valTo, tokenAddr, amount) !== -1;
 }
 

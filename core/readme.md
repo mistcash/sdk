@@ -22,6 +22,21 @@ const contract = getChamber(provider);
 // ⚠️ Will show assets even if transaction is spent
 // ⚠️ Contract has no way of knowing which transaction is spent
 const asset = await fetchTxAssets(contract, valKey, valTo);
+
+
+// Manually checking if tx exists
+
+// fetch existing transactions
+const allTransactions = await contract.tx_array();
+
+// generate full transaction hash
+const tx = await txHash(claimingKey, recipient, tokenAddr, amount)
+
+// check if your transaction is in the list
+allTransactions.indexOf(tx);
+
+
+
 ```
 
 ## Contributing

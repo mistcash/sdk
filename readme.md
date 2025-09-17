@@ -76,10 +76,13 @@ const secret = await txSecret(valKey, valTo);
 // ⚠️ use checkTxExists to find fully private transactions
 const asset = await fetchTxAssets(contract, valKey, valTo);
 
+
 // Check if a transaction with specified assets exists
 // 🟢 Some transactions have their assets private
 // 🟡 fully private transactions need all the details
-const txExists = await checkTxExists(contract, valKey, valTo, tokenAddr, amount);
+const txExists = await checkTxExists(contract, claimingKey, recipient, tokenAddr, amount);
+
+
 ```
 
 ## Packages
