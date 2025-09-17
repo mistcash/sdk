@@ -8,11 +8,13 @@ import { Asset } from './types';
  * @param provider Starknet provider
  * @returns Typed chamber contract
  */
-export function getChamber(provider?: ProviderInterface | AccountInterface): ChamberTypedContract {
+export function getChamber(providerOrAccount?: ProviderInterface | AccountInterface): ChamberTypedContract {
 	return new Contract(
-		CHAMBER_ABI,
-		CHAMBER_ADDR_MAINNET,
-		provider
+		{
+			abi: CHAMBER_ABI,
+			address: CHAMBER_ADDR_MAINNET,
+			providerOrAccount
+		}
 	).typedv2(CHAMBER_ABI)
 }
 
