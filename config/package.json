@@ -25,7 +25,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "starknet": "^7.6.4"
+    "starknet": "^8.0.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

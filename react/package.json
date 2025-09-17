@@ -28,18 +28,18 @@
     "@mistcash/config": "workspace:*",
     "@mistcash/crypto": "workspace:*",
     "@mistcash/sdk": "workspace:*",
-    "@starknet-react/chains": "^4.0.4",
-    "@starknet-react/core": "^4.0.4",
-    "starknet": "^7.6.4"
+    "@starknet-react/chains": "^5.0.2",
+    "@starknet-react/core": "^5.0.2",
+    "starknet": "^8.0.0"
   },
   "peerDependencies": {
-    "react": ">=18.0.0"
+    "react": "^19.1.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
-    "@types/react": "^18.0.0",
+    "@types/react": "^19.1.0",
     "jest": "^29.5.0",
-    "react": "^18.0.0",
+    "react": "^19.1.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   }
