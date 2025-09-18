@@ -1,3 +1,17 @@
+// Types generated from ABI
+export interface Asset {
+	amount: string; // field
+	addr: string; // field
+}
+
+export interface WitnessData {
+	claiming_key: string; // private field
+	recipient: string; // public field
+	asset: Asset; // public struct
+	proof: string[]; // private array of 20 fields
+	root: string; // public field
+}
+
 export const testCircuit = {
 	"noir_version": "1.0.0-beta.5+c651df6e2bf5db3966aa0c95abea2fc4c69d4513", "hash": "3883201509278327536", "abi": { "parameters": [{ "name": "x", "type": { "kind": "field" }, "visibility": "private" }, { "name": "y", "type": { "kind": "field" }, "visibility": "public" }], "return_type": null, "error_types": {} }, "bytecode": "H4sIAAAAAAAA/7VSWw4CIQzkoVG/Ze/R8ljKn1eRyN7/CMYICWH7t+wkZAhthpmCFH+oun64VJZij9bzqgzHgL2Wg9X7Em1Bh2+wKVMAH/JKSBgofCw5V8hTTDlFSOhdwS0kt1UxOc8XSCbzKeHV5AGozvhMXe5TSOZsrD0GXrq6njjLpm/O0Ycbk3Hp9mbIyb0DHETT05WvYg811FrvffAn5/vD0Ytm7mp4VjbdWZvnF3hgTpCVBAAA", "debug_symbols": "dY/BCoMwDIbfJeceFObFVxlDao0SCGmJ7WCI774ournDLk2Tv9/f/AsM2JepIxnjDO19gV6JmaaOY/CZoth0WR2cbZcV0UZw0Y1KXlEytFKYHTw9l/3RnLzsNXs1tXKAMlg1w5EYt9vqvnT1H701B9vUH7gx+mGdD6Q/+0IFbe2gtnPdLJV8z3gkGYuES7D8SqdyRk8aAw5FcTPdNfvmDQ==", "file_map": { "50": { "source": "fn main(x: Field, y: pub Field) {\n    assert(x != y);\n}\n", "path": "/Users/shramee/www/crypto/scaffold-garaga/circuit/src/main.nr" } }, "names": ["main"], "brillig_names": ["directive_invert"]
 };
