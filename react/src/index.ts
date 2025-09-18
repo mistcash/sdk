@@ -1,3 +1,4 @@
+export * from './useNoir';
 import { useState } from 'react';
 import { devStr, devVal, Asset, fetchTxAssets, getChamber } from '@mistcash/sdk';
 import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
