@@ -6,20 +6,8 @@ import { getZKHonkCallData } from "garaga";
 const HonkFlavor = {
 	Starknet: 1,
 };
-
-// Types generated from ABI
-export interface Asset {
-	amount: string; // field
-	addr: string; // field
-}
-
-export interface WitnessData {
-	claiming_key: string; // private field
-	recipient: string; // public field
-	asset: Asset; // public struct
-	proof: string[]; // private array of 20 fields
-	root: string; // public field
-}
+import { Asset, WitnessData } from '@mistcash/config';
+export { Asset, WitnessData };
 
 const honkBackendOpts = { starknetZK: true };
 
