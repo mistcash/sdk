@@ -6,8 +6,7 @@ import { getZKHonkCallData } from "garaga";
 const HonkFlavor = {
 	Starknet: 1,
 };
-import { Asset, WitnessData } from '@mistcash/config';
-export { Asset, WitnessData };
+import { WitnessData } from '@mistcash/config';
 
 const honkBackendOpts = { starknetZK: true };
 
