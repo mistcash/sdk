@@ -1,9 +1,12 @@
 export * from './useNoir';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { devStr, devVal, Asset, fetchTxAssets, getChamber } from '@mistcash/sdk';
 import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
 import { Call, ProviderInterface } from "starknet";
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
+import { useNoirProof } from './useNoir';
+import { calculateMerkleRootAndProof, txSecret } from '@mistcash/crypto';
+import { poseidonHashBN254 } from 'garaga';
 
 export interface UseMistResult {
   chamberAddress: `0x${string}`;
@@ -12,6 +15,7 @@ export interface UseMistResult {
   valTo: string;
   setTo: (val: string) => void;
   valKey: string;
+  txLeaves: bigint[];
   setKey: (val: string) => void;
   asset: Asset | undefined;
   setAsset: (asset: Asset | undefined) => void;
@@ -23,6 +27,7 @@ export interface UseMistResult {
   error: string | null;
   txError: Error | null;
   fetchAsset: () => Promise<Asset>;
+  handleWithdraw: (asset: Asset) => Promise<void>;
 }
 
 type LoadingStatus = "FINDING_TX" | "READY";
@@ -33,8 +38,10 @@ const loadingStatuses: Record<LoadingStatus, [LoadingStatus, string]> = {
 };
 
 export function useMist(provider: ProviderInterface | UseProviderResult, sendTx: UseSendTransactionResult): UseMistResult {
+  const { generateCalldata, generateProof } = useNoirProof();
   const actualProvider = 'provider' in provider ? provider.provider : provider;
 
+  const [txLeaves, setTxLeaves] = useState<bigint[]>([]);
   const [[loadingStatus, loadingMessage], _setLoadingMsg] = useState<[LoadingStatus, string]>(loadingStatuses.READY);
   const setLoadingMsg = (status: LoadingStatus) => _setLoadingMsg(loadingStatuses[status]);
 
@@ -46,8 +53,55 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   }));
   const setAssetAddr = (addr: string) => setAsset({ amount: asset?.amount || 0n, addr });
   const setAssetAmt = (amount: bigint) => setAsset({ amount, addr: asset?.addr || '' });
-  const contract = getChamber(actualProvider);
+  const contract = useMemo(() => {
+    return getChamber(actualProvider);
+  }, [actualProvider]) as ChamberTypedContract;
+
   const { send, isPending, error: txError } = sendTx;
+
+  useEffect(() => {
+    (async () => {
+      const leaves = await contract?.tx_array() as bigint[]
+      setTxLeaves(leaves);
+    })()
+  }, [contract]);
+
+  async function handleWithdraw(asset: Asset) {
+
+    const merkle_root = await contract?.merkle_root() as bigint;
+    const tx_secret = await txSecret(valKey, valTo);
+    const tx_hash = poseidonHashBN254(poseidonHashBN254(tx_secret, BigInt(asset.addr)), BigInt(asset.amount));
+    const tx_index = txLeaves.indexOf(tx_hash);
+    const merkleProofWRoot = calculateMerkleRootAndProof(txLeaves, tx_index);
+    const merkleProof = merkleProofWRoot.slice(0, merkleProofWRoot.length - 1).map(bi => bi.toString());
+
+    const witness = {
+      claiming_key: valKey,
+      recipient: valTo,
+      asset: {
+        amount: asset.amount.toString(),
+        addr: asset.addr
+      },
+      proof: [...merkleProof, ...new Array(20 - merkleProof.length).fill('0')],
+      root: merkle_root.toString(),
+      new_tx_secret: '0',
+      new_tx_amount: '0',
+    };
+
+    try {
+      const proof = await generateProof(witness);
+      const calldata = (await generateCalldata(proof)).slice(1);
+      if (contract) {
+        send([
+          contract.populate('handle_zkp', [calldata])
+        ]);
+      } else {
+        throw 'contract not set up!'
+      }
+    } catch (error) {
+      console.error("Failed to process withdraw:", error);
+    }
+  }
 
   async function fetchAssets() {
     setLoadingMsg('FINDING_TX');
@@ -64,6 +118,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     chamberAddress: CHAMBER_ADDR_MAINNET,
     loadingStatus,
     loadingMessage,
+    txLeaves,
     valTo, setTo,
     valKey, setKey,
     asset, setAsset,
@@ -74,6 +129,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     isPending,
     error,
     txError,
-    fetchAsset: fetchAssets
+    fetchAsset: fetchAssets,
+    handleWithdraw,
   };
 }
