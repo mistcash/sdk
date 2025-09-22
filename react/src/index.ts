@@ -30,7 +30,7 @@ export interface UseMistResult {
   txError: Error | null;
   fetchAsset: () => Promise<Asset>;
   updateTxLeaves: () => Promise<bigint[]>;
-  handleWithdraw: (asset: Asset) => Promise<void>;
+  handleWithdraw: (asset: Asset, new_tx_amount: string) => Promise<void>;
 
   valSnHTo: string;
   setSnHTo: (val: string) => void;
@@ -88,7 +88,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     setTxLeaves(leaves);
     return leaves;
   }
-  async function handleWithdraw(asset: Asset) {
+  async function handleWithdraw(asset: Asset, new_tx_amount?: string) {
     const merkle_root = await contract?.merkle_root() as bigint;
     const tx_secret = await txSecret(valKey, valTo);
     const new_tx_secret = await txSecret(valSnHKey, valSnHTo);
@@ -107,7 +107,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
       proof: [...merkleProof, ...new Array(20 - merkleProof.length).fill('0')],
       root: merkle_root.toString(),
       new_tx_secret: new_tx_secret.toString(),
-      new_tx_amount: valSnHAmt || '0',
+      new_tx_amount,
     };
 
     try {
