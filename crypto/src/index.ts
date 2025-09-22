@@ -23,13 +23,7 @@ export async function hash(a: bigint, b: bigint): Promise<bigint> {
 export async function txSecret(key: string, to: string): Promise<bigint> {
   // should use bn245 poseidon hash as used in circom
   // hash key and recipient to generate tx secret
-  if (key && to) {
-    // both should be non zero
-    return hash(BigInt(key), BigInt(to));
-  } else {
-    // both should be non zero
-    return BigInt(0);
-  }
+  return hash(BigInt(key), BigInt(to));
 }
 
 // This returns the full hash of the transaction which is present on the merkle tree
