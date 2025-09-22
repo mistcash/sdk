@@ -12,7 +12,7 @@ flowchart TD
     A --> A4[Generate Claiming Key]
 
     A4 --> B[Generate Transaction Secret]
-    B --> B1["txSecretHash(claimingKey, recipient)"]
+    B --> B1["txSecret(claimingKey, recipient)"]
     
     B1 --> C[Prepare Transaction Calls]
     C --> C1["ERC20.approve(chamberAddress, amount)"]
@@ -31,13 +31,13 @@ flowchart TD
 ### Code Example
 ```typescript
 import { useMist } from '@mistcash/react';
-import { txSecretHash } from '@mistcash/crypto';
+import { txSecret } from '@mistcash/crypto';
 import { uint256 } from 'starknet';
 
 // In your React component
 async function submitTransaction(claimingKey: string, recipient: string, tokenAddr: string, amount: bigint) {
 	// Generate transaction secret
-	const txSecret = txSecretHash(claimingKey, recipient);
+	const txSecret = await txSecret(claimingKey, recipient);
 	const amount = uint256.bnToUint256(amount_bi);
 	erc20.address = selectedToken
 	const asset = {
@@ -63,7 +63,7 @@ async function submitTransaction(claimingKey: string, recipient: string, tokenAd
 ```mermaid
 flowchart TD
     A[Backend: Receive Claiming Key + Recipient] --> B[Generate Transaction Secret]
-    B --> B1["txSecretHash(claimingKey, recipient)"]
+    B --> B1["txSecret(claimingKey, recipient)"]
     
     B1 --> C[Query Chamber Contract]
     C --> C1["contract.read_tx(txSecret)"]
