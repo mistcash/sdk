@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { devStr, devVal, Asset, fetchTxAssets, getChamber } from '@mistcash/sdk';
 import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
 import { Call, ProviderInterface } from "starknet";
-import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
+import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract, WitnessData } from '@mistcash/config';
 import { useNoirProof } from './useNoir';
 import { calculateMerkleRootAndProof, txSecret } from '@mistcash/crypto';
 import { init as initGaraga, poseidonHashBN254 } from 'garaga';
@@ -111,7 +111,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     };
 
     try {
-      const proof = await generateProof(witness);
+      const proof = await generateProof(witness as WitnessData);
       const calldata = (await generateCalldata(proof)).slice(1);
       if (contract) {
         send([
