@@ -12,11 +12,13 @@ export interface UseMistResult {
   chamberAddress: `0x${string}`;
   loadingStatus: LoadingStatus;
   loadingMessage: string;
+
   valTo: string;
   setTo: (val: string) => void;
   valKey: string;
-  txLeaves: bigint[];
   setKey: (val: string) => void;
+
+  txLeaves: bigint[];
   asset: Asset | undefined;
   setAsset: (asset: Asset | undefined) => void;
   setAssetAddr: (addr: string) => void;
@@ -27,7 +29,15 @@ export interface UseMistResult {
   error: string | null;
   txError: Error | null;
   fetchAsset: () => Promise<Asset>;
+  updateTxLeaves: () => Promise<bigint[]>;
   handleWithdraw: (asset: Asset) => Promise<void>;
+
+  valSnHTo: string;
+  setSnHTo: (val: string) => void;
+  valSnHKey: string;
+  setSnHKey: (val: string) => void;
+  valSnHAmt: string;
+  setSnHAmt: (val: string) => void;
 }
 
 type LoadingStatus = "FINDING_TX" | "READY";
@@ -53,6 +63,12 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   }));
   const setAssetAddr = (addr: string) => setAsset({ amount: asset?.amount || 0n, addr });
   const setAssetAmt = (amount: bigint) => setAsset({ amount, addr: asset?.addr || '' });
+
+  // Seek and hide second transaction params
+  const [valSnHTo, setSnHTo] = useState<string>('');
+  const [valSnHKey, setSnHKey] = useState<string>('');
+  const [valSnHAmt, setSnHAmt] = useState<string>('');
+
   const contract = useMemo(() => {
     return getChamber(actualProvider);
   }, [actualProvider]) as ChamberTypedContract;
@@ -67,10 +83,15 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     })()
   }, [contract]);
 
+  async function updateTxLeaves() {
+    const leaves = await contract?.tx_array() as bigint[]
+    setTxLeaves(leaves);
+    return leaves;
+  }
   async function handleWithdraw(asset: Asset) {
-
     const merkle_root = await contract?.merkle_root() as bigint;
     const tx_secret = await txSecret(valKey, valTo);
+    const new_tx_secret = await txSecret(valSnHKey, valSnHTo);
     const tx_hash = poseidonHashBN254(poseidonHashBN254(tx_secret, BigInt(asset.addr)), BigInt(asset.amount));
     const tx_index = txLeaves.indexOf(tx_hash);
     const merkleProofWRoot = calculateMerkleRootAndProof(txLeaves, tx_index);
@@ -85,8 +106,8 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
       },
       proof: [...merkleProof, ...new Array(20 - merkleProof.length).fill('0')],
       root: merkle_root.toString(),
-      new_tx_secret: '0',
-      new_tx_amount: '0',
+      new_tx_secret: new_tx_secret.toString(),
+      new_tx_amount: valSnHAmt || '0',
     };
 
     try {
@@ -120,6 +141,13 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     loadingStatus,
     loadingMessage,
     txLeaves,
+    updateTxLeaves,
+
+    // Seek and hide params
+    valSnHTo, setSnHTo,
+    valSnHKey, setSnHKey,
+    valSnHAmt, setSnHAmt,
+
     valTo, setTo,
     valKey, setKey,
     asset, setAsset,
