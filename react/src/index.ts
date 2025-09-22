@@ -128,7 +128,9 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   async function fetchAssets() {
     setLoadingMsg('FINDING_TX');
     const asset = await fetchTxAssets(contract, valKey, valTo);
-    setAsset(asset)
+    if (asset.amount != BigInt(0)) {
+      setAsset(asset)
+    }
     setLoadingMsg('READY'); // clearing loading message
     return asset
   }
