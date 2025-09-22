@@ -125,7 +125,39 @@ export const CHAMBER_ABI = [
 			},
 			{
 				"type": "function",
-				"name": "withdraw",
+				"name": "seek_and_hide_no_zk",
+				"inputs": [
+					{
+						"name": "claiming_key",
+						"type": "core::integer::u256"
+					},
+					{
+						"name": "recipient",
+						"type": "core::starknet::contract_address::ContractAddress"
+					},
+					{
+						"name": "asset",
+						"type": "contracts::multi_asset::Asset"
+					},
+					{
+						"name": "proof",
+						"type": "core::array::Span::<core::integer::u256>"
+					},
+					{
+						"name": "new_tx_secret",
+						"type": "core::integer::u256"
+					},
+					{
+						"name": "new_tx_amount",
+						"type": "core::integer::u256"
+					}
+				],
+				"outputs": [],
+				"state_mutability": "external"
+			},
+			{
+				"type": "function",
+				"name": "handle_zkp",
 				"inputs": [
 					{
 						"name": "proof",
@@ -258,6 +290,25 @@ export const CHAMBER_ABI = [
 			}
 		],
 		"state_mutability": "view"
+	},
+	{
+		"type": "function",
+		"name": "setVerifierAddress",
+		"inputs": [
+			{
+				"name": "verifier",
+				"type": "verifier_contracts::honk_verifier::IUltraStarknetZKHonkVerifierDispatcher"
+			}
+		],
+		"outputs": [],
+		"state_mutability": "external"
+	},
+	{
+		"type": "function",
+		"name": "recalculate_merkle_root",
+		"inputs": [],
+		"outputs": [],
+		"state_mutability": "external"
 	},
 	{
 		"type": "event",

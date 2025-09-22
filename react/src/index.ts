@@ -39,7 +39,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   const setLoadingMsg = (status: LoadingStatus) => _setLoadingMsg(loadingStatuses[status]);
 
   const [valTo, setTo] = useState<string>(devStr('0x021233997111a61e323Bb6948c42441a2b1a25cc0AB29BB0B719c483f7C9f469'));
-  const [valKey, setKey] = useState<string>(devStr('22'));
+  const [valKey, setKey] = useState<string>(devStr('0xdada'));
   const [asset, setAsset] = useState<Asset | undefined>(devVal({
     amount: BigInt('1000000000000'),
     addr: '0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7'
