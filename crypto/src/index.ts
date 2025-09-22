@@ -33,3 +33,14 @@ export async function txHash(valKey: string, valTo: string, tokenAddr: string, a
   const tx_secret = await txSecret(valKey, valTo);
   return hash(await hash(tx_secret, BigInt(tokenAddr)), BigInt(amount));
 }
+
+export function generateClaimingKey(): string {
+  const keyParts = [
+    Math.floor(Math.random() * 32 ** 16).toString(16),
+    Math.floor(Math.random() * 32 ** 16).toString(16),
+    Math.floor(Math.random() * 32 ** 16).toString(16),
+    Math.floor(Math.random() * 32 ** 16).toString(16),
+  ];
+  const key = '0x' + keyParts.join('');
+  return key;
+}
