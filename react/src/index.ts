@@ -15,6 +15,8 @@ export interface UseMistResult {
   setKey: (val: string) => void;
   asset: Asset | undefined;
   setAsset: (asset: Asset | undefined) => void;
+  setAssetAddr: (addr: string) => void;
+  setAssetAmt: (amount: bigint) => void;
   contract: ChamberTypedContract;
   send: (args?: Call[] | undefined) => void;
   isPending: boolean;
@@ -39,9 +41,11 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   const [valTo, setTo] = useState<string>(devStr('0x021233997111a61e323Bb6948c42441a2b1a25cc0AB29BB0B719c483f7C9f469'));
   const [valKey, setKey] = useState<string>(devStr('22'));
   const [asset, setAsset] = useState<Asset | undefined>(devVal({
-    amount: BigInt('10000000000000000'),
-    addr: '2009894490435840142178314390393166646092438090257831307886760648929397478285'
+    amount: BigInt('1000000000000'),
+    addr: '0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7'
   }));
+  const setAssetAddr = (addr: string) => setAsset({ amount: asset?.amount || 0n, addr });
+  const setAssetAmt = (amount: bigint) => setAsset({ amount, addr: asset?.addr || '' });
   const contract = getChamber(actualProvider);
   const { send, isPending, error: txError } = sendTx;
 
@@ -63,6 +67,8 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
     valTo, setTo,
     valKey, setKey,
     asset, setAsset,
+    setAssetAddr,
+    setAssetAmt,
     contract,
     send,
     isPending,
