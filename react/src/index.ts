@@ -6,7 +6,7 @@ import { Call, ProviderInterface } from "starknet";
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
 import { useNoirProof } from './useNoir';
 import { calculateMerkleRootAndProof, txSecret } from '@mistcash/crypto';
-import { poseidonHashBN254 } from 'garaga';
+import { init as initGaraga, poseidonHashBN254 } from 'garaga';
 
 export interface UseMistResult {
   chamberAddress: `0x${string}`;
@@ -61,6 +61,7 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
 
   useEffect(() => {
     (async () => {
+      initGaraga();
       const leaves = await contract?.tx_array() as bigint[]
       setTxLeaves(leaves);
     })()
