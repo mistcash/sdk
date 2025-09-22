@@ -1,3 +1,4 @@
+export * from './merkle';
 import { poseidonHashBN254, initSync, init as initGaraga } from "garaga";
 
 // Poseidon hash used in the circuits and the contract
