@@ -36,7 +36,11 @@ export async function fetchTxAssets(contract: ChamberTypedContract, valKey: stri
 	} else if (typeof amount != 'bigint') {
 		amount = BigInt(`${amount.low}`);
 	}
-	return { amount, addr: asset.addr }
+	let addr = asset.addr as string | bigint;
+	if (typeof addr === 'bigint') {
+		addr = '0x' + addr.toString(16);
+	}
+	return { amount, addr }
 }
 
 /**
