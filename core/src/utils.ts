@@ -82,3 +82,26 @@ export async function getTxIndexInTree(leaves: bigint[], valKey: string, valTo: 
 	const tx_hash = await txHash(valKey, valTo, tokenAddr, amount)
 	return leaves.indexOf(tx_hash);
 }
+
+export function fmtAmount(amount: bigint, decimals: number): string {
+	// Convert bigint amount to string with specified decimal places
+	const factor = BigInt(10 ** decimals);
+	const integerPart = amount / factor;
+	const fractionalPart = amount % factor;
+
+	// Pad fractional part with leading zeros to match decimal places
+	const fractionalStr = fractionalPart.toString().padStart(decimals, '0');
+	// Remove trailing zeros
+	const trimmedFractional = fractionalStr.replace(/0+$/, '') || '0';
+
+	return `${integerPart.toString()}.${trimmedFractional}`;
+}
+
+export function fmtAmtToBigInt(amountStr: string, decimals: number): bigint {
+	let amt = BigInt(Math.floor(1_000_000 * +amountStr));
+	if (decimals > 6) {
+		// Mul by 10**12 for decimal points == 18 for all token but usdc
+		amt = BigInt(10 ** (decimals - 6)) * amt;
+	}
+	return amt;
+}
