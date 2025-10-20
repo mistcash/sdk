@@ -27,7 +27,7 @@
   "dependencies": {
     "@mistcash/config": "workspace:*",
     "@mistcash/crypto": "workspace:*",
-    "starknet": "^8.0.0"
+    "starknet": "^8.1.2"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
