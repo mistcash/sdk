@@ -59,11 +59,11 @@ describe("transaction_hashing_and_merkle_trees", () => {
 			proverArgs.asset.addr,
 			proverArgs.asset.amount,
 		);
-
 		expect(allTransactions.indexOf(tx_hash)).toBe(7);
+	});
 
+	it("compute tx merkle path", async () => {
 		const merkle_path = calculateMerkleRootAndProof(allTransactions, 7).slice(0, -1);
-		expect(merkle_path.length).toBe(proverArgs.proof.length);
 		expect(merkle_path).toStrictEqual(proverArgs.proof);
 	});
 });
