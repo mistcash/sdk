@@ -1,4 +1,4 @@
-import { calculateMerkleRoot, calculateMerkleRootAndProof } from "../../../apps/web/src/utils/merkle";
+import { calculateMerkleRoot, calculateMerkleRootAndProof } from "../src";
 import { init } from "garaga";
 
 describe("calculateMerkleRoot", () => {
