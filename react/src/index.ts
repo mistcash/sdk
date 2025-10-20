@@ -5,7 +5,7 @@ import { StarknetTypedContract, UseProviderResult, UseSendTransactionResult } fr
 import { Call, ProviderInterface } from "starknet";
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract, WitnessData } from '@mistcash/config';
 import { useNoirProof } from './useNoir';
-import { calculateMerkleRootAndProof, txSecret } from '@mistcash/crypto';
+import { calculateMerkleRootAndProof, txHash, txSecret } from '@mistcash/crypto';
 import { init as initGaraga, poseidonHashBN254 } from 'garaga';
 
 export interface UseMistResult {
@@ -90,9 +90,8 @@ export function useMist(provider: ProviderInterface | UseProviderResult, sendTx:
   }
   async function handleWithdraw(asset: Asset, new_tx_amount?: string) {
     const merkle_root = await contract?.merkle_root() as bigint;
-    const tx_secret = await txSecret(valKey, valTo);
     const new_tx_secret = await txSecret(valSnHKey, valSnHTo);
-    const tx_hash = poseidonHashBN254(poseidonHashBN254(tx_secret, BigInt(asset.addr)), BigInt(asset.amount));
+    const tx_hash = await txHash(valKey, valTo, BigInt(asset.addr).toString(), BigInt(asset.amount).toString());
     const tx_index = txLeaves.indexOf(tx_hash);
     const merkleProofWRoot = calculateMerkleRootAndProof(txLeaves, tx_index);
     const merkleProof = merkleProofWRoot.slice(0, merkleProofWRoot.length - 1).map(bi => bi.toString());
