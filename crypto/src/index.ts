@@ -31,7 +31,8 @@ export async function txSecret(key: string, to: string): Promise<bigint> {
 // This can be used to verify that a transaction exists
 export async function txHash(valKey: string, valTo: string, tokenAddr: string, amount: string): Promise<bigint> {
   const tx_secret = await txSecret(valKey, valTo);
-  return await hash(await hash(tx_secret, BigInt(tokenAddr)), BigInt(amount));
+  const tx_hash = await hash(await hash(tx_secret, BigInt(tokenAddr)), BigInt(amount));
+  return tx_hash % 2n == 1n ? tx_hash - 1n : tx_hash;
 }
 
 export function generateClaimingKey(): string {
