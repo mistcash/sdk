@@ -1,5 +1,9 @@
 import { calculateMerkleRoot, calculateMerkleRootAndProof } from "../src";
-import { init } from "garaga";
+import { init, poseidonHashBN254 } from "garaga";
+
+const maybePoseidonHash254 = (left: bigint, right: bigint): bigint => {
+	return left == 0n ? right : poseidonHashBN254(left, right);
+};
 
 describe("calculateMerkleRoot", () => {
 	// this test requires setup
@@ -36,11 +40,11 @@ describe("calculateMerkleRoot", () => {
 	const merkleRoot = 6438977049748256494652080486557650606703653145732020688108992093677347159459n;
 
 	it("correct merkle root", () => {
-		expect(calculateMerkleRoot(leaves)).toBe(merkleRoot);
+		expect(calculateMerkleRoot(leaves, maybePoseidonHash254, l => l)).toBe(merkleRoot);
 	});
 
 	it("merkle proof", () => {
-		const merkle_path = calculateMerkleRootAndProof(leaves, 7).slice(0, -1);
+		const merkle_path = calculateMerkleRootAndProof(leaves, 7, maybePoseidonHash254, l => l).slice(0, -1);
 		expect(merkle_path.length).toBe(path.length);
 		expect(merkle_path).toStrictEqual(path);
 	});
