@@ -188,6 +188,38 @@ export const CHAMBER_ABI = [
 					}
 				],
 				"state_mutability": "view"
+			},
+			{
+				"type": "function",
+				"name": "merkle_proof",
+				"inputs": [
+					{
+						"name": "index",
+						"type": "core::integer::u32"
+					}
+				],
+				"outputs": [
+					{
+						"type": "core::array::Span::<core::integer::u256>"
+					}
+				],
+				"state_mutability": "external"
+			},
+			{
+				"type": "function",
+				"name": "merkle_leaves",
+				"inputs": [
+					{
+						"name": "height",
+						"type": "core::integer::u32"
+					}
+				],
+				"outputs": [
+					{
+						"type": "core::array::Array::<core::integer::u256>"
+					}
+				],
+				"state_mutability": "external"
 			}
 		]
 	},
