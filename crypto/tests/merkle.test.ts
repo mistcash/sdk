@@ -2,6 +2,11 @@ import { calculateMerkleRoot, calculateMerkleRootAndProof } from "../src";
 import { init, poseidonHashBN254 } from "garaga";
 
 const maybePoseidonHash254 = (left: bigint, right: bigint): bigint => {
+	if (right < left) {
+		const temp = left;
+		left = right;
+		right = temp;
+	}
 	return left == 0n ? right : poseidonHashBN254(left, right);
 };
 
