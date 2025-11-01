@@ -22,6 +22,14 @@ export function calculateMerkleRoot(leaves: bigint[], hasher = merkleHasher, lea
 	return tree[0];
 }
 
+export function merkleRootFromPath(element: bigint, path: bigint[], hasher = merkleHasher, leafFilter = evenLeafFilter): bigint {
+	let el = leafFilter(element);
+	for (let i = 0; i < path.length; i++) {
+		el = hasher(el, path[i]);
+	}
+	return el;
+}
+
 // write merkle root calculator
 export function calculateMerkleRootAndProof(leaves: bigint[], index: number, hasher = merkleHasher, leafFilter = evenLeafFilter): bigint[] {
 	let tree = leaves.map(leafFilter);
