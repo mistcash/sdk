@@ -1,6 +1,6 @@
 import { Abi, TypedContractV2 } from "starknet";
 
-export const CHAMBER_ADDR_MAINNET = process.env.CHAMBER_ADDR_MAINNET || '0x06a6ed89c1955ce25c5e51cf053e5db79de51a840344421a75884b0c679368a6';
+export const CHAMBER_ADDR_MAINNET = (process.env.CHAMBER_ADDR_MAINNET || '0x06a6ed89c1955ce25c5e51cf053e5db79de51a840344421a75884b0c679368a6') as `0x${string}`;
 
 export const CHAMBER_ABI = [
 	{
