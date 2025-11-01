@@ -1,5 +1,8 @@
 import { poseidonHashBN254 } from "garaga";
 
+type HasherFn = (left: bigint, right: bigint) => bigint;
+type LeafFilterFn = (eaf: bigint) => bigint;
+
 function merkleHasher(left: bigint, right: bigint): bigint {
 	if (right < left) {
 		const temp = left;
@@ -16,7 +19,7 @@ function evenLeafFilter(leaf: bigint): bigint {
 }
 
 // write merkle root calculator
-export function calculateMerkleRoot(leaves: bigint[], hasher = merkleHasher, leafFilter = evenLeafFilter): bigint {
+export function calculateMerkleRoot(leaves: bigint[], hasher: HasherFn = merkleHasher, leafFilter: LeafFilterFn = evenLeafFilter): bigint {
 	let tree = leaves.map(leafFilter);
 	while (tree.length > 1) {
 		if (tree.length % 2 != 0) {
@@ -28,7 +31,7 @@ export function calculateMerkleRoot(leaves: bigint[], hasher = merkleHasher, lea
 	return tree[0];
 }
 
-export function merkleRootFromPath(element: bigint, path: bigint[], hasher = merkleHasher, leafFilter = evenLeafFilter): bigint {
+export function merkleRootFromPath(element: bigint, path: bigint[], hasher: HasherFn = merkleHasher, leafFilter: LeafFilterFn = evenLeafFilter): bigint {
 	let el = leafFilter(element);
 	for (let i = 0; i < path.length; i++) {
 		el = hasher(el, path[i]);
@@ -37,7 +40,7 @@ export function merkleRootFromPath(element: bigint, path: bigint[], hasher = mer
 }
 
 // write merkle root calculator
-export function calculateMerkleRootAndProof(leaves: bigint[], index: number, hasher = merkleHasher, leafFilter = evenLeafFilter): bigint[] {
+export function calculateMerkleRootAndProof(leaves: bigint[], index: number, hasher: HasherFn = merkleHasher, leafFilter: LeafFilterFn = evenLeafFilter): bigint[] {
 	let tree = leaves.map(leafFilter);
 	const proof: bigint[] = [];
 
@@ -62,7 +65,7 @@ export function calculateMerkleRootAndProof(leaves: bigint[], index: number, has
 	return proof;
 }
 
-export function get_next_level(tree: bigint[], hasher = merkleHasher): bigint[] {
+export function get_next_level(tree: bigint[], hasher: HasherFn = merkleHasher): bigint[] {
 	const newLevel: bigint[] = [];
 	for (let i = 0; i < tree.length; i += 2) {
 		let left = tree[i];
