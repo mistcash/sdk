@@ -1,4 +1,4 @@
-import { calculateMerkleRoot, calculateMerkleRootAndProof } from "../src";
+import { calculateMerkleRoot, calculateMerkleRootAndProof, merkleRootFromPath } from "../src";
 import { init, poseidonHashBN254 } from "garaga";
 
 const maybePoseidonHash254 = (left: bigint, right: bigint): bigint => {
@@ -43,6 +43,12 @@ describe("calculateMerkleRoot", () => {
 		0x3a6970b2c1915e400be8671190a88a90052929be07cc3cfe6f2e00d99fe4cebn,
 	];
 	const merkleRoot = 6438977049748256494652080486557650606703653145732020688108992093677347159459n;
+
+
+	it("merkle root from path", async () => {
+		// const [tx, ...merkle_path] = path;
+		expect(merkleRootFromPath(leaves[7], path, maybePoseidonHash254, l => l)).toBe(merkleRoot);
+	});
 
 	it("correct merkle root", () => {
 		expect(calculateMerkleRoot(leaves, maybePoseidonHash254, l => l)).toBe(merkleRoot);

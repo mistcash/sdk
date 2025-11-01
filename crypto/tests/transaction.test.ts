@@ -1,4 +1,4 @@
-import { calculateMerkleRoot, calculateMerkleRootAndProof, txHash } from "../src";
+import { calculateMerkleRoot, calculateMerkleRootAndProof, merkleRootFromPath, txHash } from "../src";
 import { init } from "garaga";
 
 describe("transaction_hashing_and_merkle_trees", () => {
@@ -43,10 +43,20 @@ describe("transaction_hashing_and_merkle_trees", () => {
 			0x216bc11a7be9067d09d7a4cd4681eb4c7e436d36ff61892fd896009c6a1869fbn,
 			0x1526a6df23ab306af0949d738f9725a1a6126383c9c345735d9b9fd0a0eab4d5n,
 			0x3a6970b2c1915e400be8671190a88a90052929be07cc3cfe6f2e00d99fe4cebn,
-		]
+		],
 	};
 
 	const merkleRoot = BigInt(proverArgs.root);
+
+	it("merkle root from tx path", async () => {
+		const tx_hash = await txHash(
+			proverArgs.claiming_key,
+			proverArgs.recipient,
+			proverArgs.asset.addr,
+			proverArgs.asset.amount,
+		);
+		expect(merkleRootFromPath(tx_hash, proverArgs.proof)).toBe(merkleRoot);
+	});
 
 	it("correct transactions root", () => {
 		expect(calculateMerkleRoot(allTransactions)).toBe(merkleRoot);
