@@ -1,9 +1,9 @@
 import { poseidonHashBN254 } from "garaga";
 
-type HasherFn = (left: bigint, right: bigint) => bigint;
-type LeafFilterFn = (eaf: bigint) => bigint;
+export type HasherFn = (left: bigint, right: bigint) => bigint;
+export type LeafFilterFn = (eaf: bigint) => bigint;
 
-function merkleHasher(left: bigint, right: bigint): bigint {
+export function merkleHasher(left: bigint, right: bigint): bigint {
 	if (right < left) {
 		const temp = left;
 		left = right;
@@ -14,7 +14,7 @@ function merkleHasher(left: bigint, right: bigint): bigint {
 	return node % 2n == 0n ? node + 1n : node;
 }
 
-function evenLeafFilter(leaf: bigint): bigint {
+export function evenLeafFilter(leaf: bigint): bigint {
 	return leaf % 2n == 1n ? leaf - 1n : leaf;
 }
 
