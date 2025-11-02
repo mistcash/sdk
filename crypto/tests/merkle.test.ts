@@ -44,7 +44,6 @@ describe("calculateMerkleRoot", () => {
 	];
 	const merkleRoot = 6438977049748256494652080486557650606703653145732020688108992093677347159459n;
 
-
 	it("merkle root from path", async () => {
 		// const [tx, ...merkle_path] = path;
 		expect(merkleRootFromPath(leaves[7], path, maybePoseidonHash254, l => l)).toBe(merkleRoot);
