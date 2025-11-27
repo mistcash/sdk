@@ -1,5 +1,22 @@
-import { calculateMerkleRoot, calculateMerkleRootAndProof, merkleRootFromPath, txHash } from "../src";
+import { calculateMerkleRoot, calculateMerkleRootAndProof, merkleRootFromPath, txHash, txSecret } from "../src";
 import { init } from "garaga";
+
+const BN254_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+describe("test: key too long", () => {
+	it("compute tx merkle path", async () => {
+		const key = 0xe9cbc8b5dae730000000a658d00e8fbeb8000000eb16df490bc020000000b9aabbe9c92460000000n;
+		const tx_orig = await txSecret(key.toString(), '0');
+
+		// key % BN254_ORDER
+		const new_key = 6184067850860675403050272395057073375787531232490131160029633571728932913493n;
+		const tx_hash = await txSecret(new_key.toString(), '0');
+		// expect(tx_hash).toBe(merkleRoot);
+		console.log('tx_orig', tx_orig);
+		console.log('tx_hash', tx_hash);
+		expect(tx_orig).toBe(tx_hash);
+	});
+});
 
 describe("transaction_hashing_and_merkle_trees", () => {
 	// this test requires setup
