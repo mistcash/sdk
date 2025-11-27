@@ -36,7 +36,7 @@ export async function txHash(valKey: string, valTo: string, tokenAddr: string, a
 }
 
 export function generateClaimingKey(): string {
-  let max = 2 ** 48; // Max precision for JS Math.random
+  let max = 2 ** 48; // Max precision for JS Math.random is 52 bits
   const keyParts = [
     Math.floor(Math.random() * max).toString(16),
     Math.floor(Math.random() * max).toString(16),
