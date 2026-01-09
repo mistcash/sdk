@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Gnark Prover WASM Test</title>
+</head>
+
+<body>
+    <h1>Gnark Prover WASM Test</h1>
+    <button id="testBtn">Test Prover</button>
+    <pre id="output"></pre>
+
+    <script src="/wasm_exec.js"></script>
+    <script>
+        const output = document.getElementById('output');
+        const log = (msg) => {
+            output.textContent += msg + '\n';
+            console.log(msg);
+        };
+
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            output.textContent = '';
+            log('Loading WASM module...');
+
+            try {
+                const startLoad = performance.now();
+                const go = new Go();
+                const result = await WebAssembly.instantiateStreaming(
+                    fetch('/main.wasm'),
+                    go.importObject
+                );
+                const loadTime = performance.now() - startLoad;
+
+                log(`✓ WASM module loaded (${loadTime.toFixed(2)}ms)`);
+
+                const startRun = performance.now();
+                go.run(result.instance);
+                const runTime = performance.now() - startRun;
+
+                log(`✓ Go runtime started (${runTime.toFixed(2)}ms)`);
+
+                // Test if functions are available
+                if (typeof prove !== 'undefined') {
+                    log('✓ prove function available');
+                    // Call your exported functions here
+                } else {
+                    log('⚠ prove function not found');
+                    log('Available globals: ' + Object.keys(window).filter(k => k.startsWith('prove')).join(', '));
+                }
+
+            } catch (error) {
+                log('✗ Error: ' + error.message);
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+
+</html>
