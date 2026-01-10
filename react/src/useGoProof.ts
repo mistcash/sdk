@@ -1,15 +1,40 @@
 import { useCallback, useEffect, useState } from 'react';
 
+export interface G1Point {
+  X: string;
+  Y: string;
+}
+
+export interface G2Point {
+  X: { A0: string; A1: string };
+  Y: { A0: string; A1: string };
+}
+
+export interface Groth16Proof {
+  Ar: G1Point;
+  Krs: G1Point;
+  Bs: G2Point;
+  Commitments: G1Point[];
+  CommitmentPok: G1Point;
+}
+
+export interface ProveResult {
+  status: 'success' | 'error';
+  proof?: Groth16Proof;
+  publicInputs?: (string | number)[];
+  error?: string;
+}
+
 export interface GoWitnessData {
   ClaimingKey: string;
   Owner: string;
   TxAsset: {
-    Amount: number;
+    Amount: string;
     Addr: string;
   };
-  MerkleProof: (string | number)[];
+  MerkleProof: string[];
   Withdraw: {
-    Amount: number;
+    Amount: string;
     Addr: string;
   };
   MerkleRoot: string;
@@ -19,8 +44,8 @@ export interface GoWitnessData {
 }
 
 declare global {
-  function prove(witness: string): Promise<string>;
-  const Go: any;
+  function prove(witness: string): Promise<ProveResult | string>;
+  const Go: new () => { importObject: WebAssembly.Imports; run: (instance: WebAssembly.Instance) => void };
 }
 
 // @NOTE: Assumption on wasm files location
@@ -77,7 +102,7 @@ export function useGoProof() {
     };
   }, []);
 
-  const generateProof = useCallback(async (params: GoWitnessData): Promise<any> => {
+  const generateProof = useCallback(async (params: GoWitnessData): Promise<ProveResult> => {
     if (!isProverReady) {
       throw new Error('Go prover is not initialized.');
     }
@@ -87,8 +112,10 @@ export function useGoProof() {
     try {
       console.log(`Generating Proof...`);
       const witness = JSON.stringify(params);
-      const proofJson = await prove(witness);
-      const proof = JSON.parse(proofJson);
+      const proofResult = await prove(witness);
+      const proof: ProveResult = typeof proofResult === 'string'
+        ? JSON.parse(proofResult)
+        : proofResult;
       return proof;
     } catch (error) {
       console.error('Failed to generate proof:', error);

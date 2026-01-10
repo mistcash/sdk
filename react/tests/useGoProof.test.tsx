@@ -1,5 +1,5 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useGoProof, GoWitnessData } from '../src/useGoProof';
+import { useGoProof, GoWitnessData, ProveResult } from '../src/useGoProof';
 
 // Mock global objects and functions
 const mockProve = jest.fn();
@@ -39,16 +39,29 @@ describe('useGoProof', () => {
   const mockWitness: GoWitnessData = {
     ClaimingKey: '0x123',
     Owner: '0x456',
-    TxAsset: { Amount: 100, Addr: '0x789' },
+    TxAsset: { Amount: '100', Addr: '0x789' },
     MerkleProof: [],
-    Withdraw: { Amount: 90, Addr: '0x789' },
+    Withdraw: { Amount: '90', Addr: '0x789' },
     MerkleRoot: '0xabc',
     Nullifier: '0xdef',
     NewTxSecret: '0xghi',
     NewTx: '0xjkl',
   };
 
-  const mockProof = { proof: 'mock_proof_data' };
+  const mockProof: ProveResult = {
+    status: 'success',
+    proof: {
+      Ar: { X: '123', Y: '456' },
+      Krs: { X: '789', Y: '012' },
+      Bs: {
+        X: { A0: '111', A1: '222' },
+        Y: { A0: '333', A1: '444' },
+      },
+      Commitments: [],
+      CommitmentPok: { X: '0', Y: '0' },
+    },
+    publicInputs: ['123', '456'],
+  };
 
   it('should initialize the prover and set isProverReady to true', async () => {
     const { result } = renderHook(() => useGoProof());
@@ -61,14 +74,31 @@ describe('useGoProof', () => {
   });
 
 
-  it('should call the prove function with the correct witness and return the proof', async () => {
+  it('should call the prove function with the correct witness and return the proof (string response)', async () => {
     mockProve.mockResolvedValue(JSON.stringify(mockProof));
 
     const { result } = renderHook(() => useGoProof());
 
     await waitFor(() => expect(result.current.isProverReady).toBe(true));
 
-    let proof;
+    let proof: ProveResult | undefined;
+    await act(async () => {
+      proof = await result.current.generateProof(mockWitness);
+    });
+
+    expect(result.current.isGeneratingProof).toBe(false);
+    expect(mockProve).toHaveBeenCalledWith(JSON.stringify(mockWitness));
+    expect(proof).toEqual(mockProof);
+  });
+
+  it('should call the prove function with the correct witness and return the proof (object response)', async () => {
+    mockProve.mockResolvedValue(mockProof);
+
+    const { result } = renderHook(() => useGoProof());
+
+    await waitFor(() => expect(result.current.isProverReady).toBe(true));
+
+    let proof: ProveResult | undefined;
     await act(async () => {
       proof = await result.current.generateProof(mockWitness);
     });
