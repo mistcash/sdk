@@ -16,8 +16,11 @@
     "clean": "pnpm -r clean"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.0.0",
     "@types/jest": "^29.5.0",
     "jest": "^29.5.0",
+    "jest-environment-jsdom": "^29.5.0",
+    "ts-jest": "^29.1.2",
     "typescript": "^5.0.0"
   },
   "repository": {
