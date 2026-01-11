@@ -1,4 +1,4 @@
-import { WasmExports, WasmInstance } from '../types';
+import { ProofResponse, WasmExports, WasmInstance, Witness } from '../types';
 import { decodeMAIN_WASM } from './wasm-main.embedded';
 import './wasm_exec.js';
 
@@ -65,4 +65,37 @@ export async function getWasmInstance(): Promise<WasmInstance> {
  */
 export async function initWasm(): Promise<WasmExports> {
   return (await getWasmInstance()).exports;
+}
+
+/**
+ * Calls prove function from WASM module
+ * @param witness Proof generation witness
+ * @returns Proof response
+ */
+export async function prove(witness: Witness): Promise<ProofResponse> {
+  let { prove } = await initWasm();
+  return await prove(JSON.stringify(witness));
+}
+
+/**
+ * Calls 2-way hash function from WASM module
+ * @param a
+ * @param b
+ * @returns 
+ */
+export async function hash2(a: string, b: string): Promise<string> {
+  let { hash2 } = await initWasm();
+  return await hash2(a, b);
+}
+
+/**
+ * Calls 3-way hash function from WASM module
+ * @param a
+ * @param b
+ * @param c
+ * @returns 
+ */
+export async function hash3(a: string, b: string, c: string): Promise<string> {
+  let { hash3 } = await initWasm();
+  return await hash3(a, b, c);
 }
