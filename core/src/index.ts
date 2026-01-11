@@ -1,5 +1,6 @@
+import { prove_groth16 } from './gnark';
 // Go WASM utils
-export * from './goWasm/.';
+export * from './gnark';
 
 // Dev utils
 export * from './dev';
