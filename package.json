@@ -9,11 +9,12 @@
     "react"
   ],
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm embed-wasm;pnpm -r build",
     "dev": "pnpm -r dev",
     "test": "pnpm -r test",
     "test:watch": "pnpm -r test:watch",
     "clean": "pnpm -r clean",
+    "embed-wasm": "bash scripts/embed-wasm.sh",
     "format": "prettier --write \"**/*.{js,ts,tsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{js,ts,tsx,json,md,yml,yaml}\""
   },
