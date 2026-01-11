@@ -1,4 +1,5 @@
-import { initWasm, getWasmInstance } from './goWasm/wasmLoader';
+import { initWasm, getWasmInstance } from './goWasm/.';
+import { ProofResponse, Witness } from './types';
 
 // Re-export types
 export * from './dev';
@@ -7,9 +8,9 @@ export * from './types';
 
 export { getWasmInstance, initWasm };
 
-export async function prove(witness: string): Promise<string> {
+export async function prove(witness: Witness): Promise<ProofResponse> {
   let { prove } = await initWasm();
-  return await prove(witness);
+  return await prove(JSON.stringify(witness));
 }
 
 export async function hash2(left: string, right: string): Promise<string> {

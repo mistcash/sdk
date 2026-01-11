@@ -1,11 +1,11 @@
-import { initWasm } from '..';
+import { hash3, hash2, prove, initWasm } from '..';
 
 const FIXTURE_WITNESS = {
   ClaimingKey: '0x6162726163616461627261',
   Owner: '0x6a6f65',
   TxAsset: {
-    Amount: '100000',
-    Addr: '0x2877e73feb5b7af1e12db1ff5b15db30ffa42182406241f672e9e611f42f3e1',
+    amount: '100000',
+    addr: '0x2877e73feb5b7af1e12db1ff5b15db30ffa42182406241f672e9e611f42f3e1',
   },
   MerkleProof: [
     '0x2cf31da613176ebbb3cf535bf414f28176bd29f1ea264db339391b66d555989c',
@@ -30,8 +30,8 @@ const FIXTURE_WITNESS = {
     '0',
   ],
   Withdraw: {
-    Amount: '97500',
-    Addr: '0x2877e73feb5b7af1e12db1ff5b15db30ffa42182406241f672e9e611f42f3e1',
+    amount: '97500',
+    addr: '0x2877e73feb5b7af1e12db1ff5b15db30ffa42182406241f672e9e611f42f3e1',
   },
   MerkleRoot: '0x1935947da594b4bc039293afa3a32bd696b5896bca7a427fc2162a7d50ae860b',
   Nullifier: '0xb18d87552c5be0d021374ee6ba3b1d4dcfe8ac1af6a8a331d9598fec500642f',
@@ -43,7 +43,7 @@ describe('@mistcash/sdk', () => {
   describe('load wasm', () => {
     it('should load wasm', async () => {
       let wasm = await initWasm();
-      const wasmExports = Object.keys(wasm.exports);
+      const wasmExports = Object.keys(wasm);
       expect(wasmExports.indexOf('prove')).toBeGreaterThan(-1);
       expect(wasmExports.indexOf('hash2')).toBeGreaterThan(-1);
       expect(wasmExports.indexOf('hash3')).toBeGreaterThan(-1);
@@ -52,58 +52,47 @@ describe('@mistcash/sdk', () => {
 
   describe('test hashing', () => {
     it('test hashing', async () => {
-      let { exports } = await initWasm();
-      expect(exports.hash3('0x1234567890', '0x9876543210', '1')).toBe(
+      expect(await hash3('0x1234567890', '0x9876543210', '1')).toBe(
         '2784974624267642952678807846760602137517276342215733276839677432747945500053',
       );
-      expect(exports.hash2('0x1234567890', '0x9876543210')).toBe(
+      expect(await hash2('0x1234567890', '0x9876543210')).toBe(
         '12568779716737065222642790056079768987407335034357740360530248514749971992218',
       );
     });
   });
 
   describe('test proofs', () => {
-    it('proving error', async () => {
-      let { exports } = await initWasm();
-      const proofError = await exports.prove();
-      expect(proofError.status).toBe('error');
-      expect(proofError.status).toBeDefined();
-    });
     it('proving incorrect proof format', async () => {
-      let { exports } = await initWasm();
-      const proofError = await exports.prove(`{"incorrect":true}`);
+      const proofError = await prove({ incorrect: true } as any);
       expect(proofError.status).toBe('error');
       expect(proofError.status).toBeDefined();
     });
     it('proving incorrect witness', async () => {
-      let { exports } = await initWasm();
       const witness = {
         ...FIXTURE_WITNESS,
         // NOTICE: Wrong claiming key
         ClaimingKey: '0x0',
       };
 
-      const proofError = await exports.prove(JSON.stringify(witness));
+      const proofError = await prove(witness);
       expect(proofError.status).toBe('error');
       expect(proofError.status).toBeDefined();
     });
 
     it('proving success', async () => {
-      let { exports } = await initWasm();
-      const proofError = await exports.prove('1');
-
-      expect(proofError.status).toBe('error');
-
       const startTime = performance.now();
-      const proofSuccess = await exports.prove(JSON.stringify(FIXTURE_WITNESS));
+      const proofSuccess = await prove(FIXTURE_WITNESS);
       const endTime = performance.now();
       console.log(`Proof generation took ${(endTime - startTime).toFixed(2)} ms`);
 
       expect(proofSuccess.status).toBe('success');
-      expect(proofSuccess.proof).toBeDefined();
-      expect(proofSuccess.proof.Ar).toBeDefined();
-      expect(proofSuccess.proof.Bs).toBeDefined();
-      expect(proofSuccess.proof.Krs).toBeDefined();
+      if (proofSuccess.status === 'success') {
+        expect(proofSuccess.proof).toBeDefined();
+        expect(proofSuccess.proof.Ar).toBeDefined();
+        expect(proofSuccess.proof.Bs).toBeDefined();
+        expect(proofSuccess.proof.Krs).toBeDefined();
+        expect(proofSuccess.publicInputs).toBeDefined();
+      }
     });
   });
 });
