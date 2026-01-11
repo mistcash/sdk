@@ -1,6 +1,7 @@
 import { ProofResponse, WasmExports, WasmInstance, Witness } from '../types';
 import { decodeMAIN_WASM } from './wasm-main.embedded';
 import './wasm_exec.js';
+export { default as vkJson } from './vk.json';
 
 // Shared state management
 let wasmInstance: WasmInstance | null = null;

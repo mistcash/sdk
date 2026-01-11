@@ -1,4 +1,5 @@
-import { hash3, hash2, prove, initWasm } from '..';
+import { hash3, hash2, prove_groth16, initWasm, initCore } from '..';
+import { full_prove } from '../src';
 
 const FIXTURE_WITNESS = {
   ClaimingKey: '0x6162726163616461627261',
@@ -63,7 +64,7 @@ describe('@mistcash/sdk', () => {
 
   describe('test proofs', () => {
     it('proving incorrect proof format', async () => {
-      const proofError = await prove({ incorrect: true } as any);
+      const proofError = await prove_groth16({ incorrect: true } as any);
       expect(proofError.status).toBe('error');
       expect(proofError.status).toBeDefined();
     });
@@ -74,14 +75,15 @@ describe('@mistcash/sdk', () => {
         ClaimingKey: '0x0',
       };
 
-      const proofError = await prove(witness);
+      const proofError = await prove_groth16(witness);
       expect(proofError.status).toBe('error');
       expect(proofError.status).toBeDefined();
     });
 
     it('proving success', async () => {
+      await initCore();
       const startTime = performance.now();
-      const proofSuccess = await prove(FIXTURE_WITNESS);
+      const proofSuccess = await prove_groth16(FIXTURE_WITNESS);
       const endTime = performance.now();
       console.log(`Proof generation took ${(endTime - startTime).toFixed(2)} ms`);
 
@@ -93,6 +95,17 @@ describe('@mistcash/sdk', () => {
         expect(proofSuccess.proof.Krs).toBeDefined();
         expect(proofSuccess.publicInputs).toBeDefined();
       }
+    });
+  });
+  describe('test proof and calldata', () => {
+    it('proving success', async () => {
+      await initCore();
+      const startTime = performance.now();
+      const proofCalldata = await full_prove(FIXTURE_WITNESS);
+      const endTime = performance.now();
+      console.log(`Proof+Calldata generation took ${(endTime - startTime).toFixed(2)} ms`);
+
+      expect(proofCalldata.length).toBeGreaterThan(0);
     });
   });
 });

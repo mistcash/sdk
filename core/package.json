@@ -27,6 +27,7 @@
   "dependencies": {
     "@mistcash/config": "workspace:*",
     "@mistcash/crypto": "workspace:*",
+    "garaga": "^1.0.1",
     "starknet": "^8.9.0"
   },
   "devDependencies": {
