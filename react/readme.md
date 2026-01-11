@@ -20,20 +20,28 @@ import { useMist } from '@mistcash/react';
 
 // Your React component
 function MyComponent() {
-	// ...
+  // ...
 
-	const {
-		// inputs state
-		valTo, setTo, valKey, setKey,
-		// assets, selection and fetching
-		asset, setAsset, fetchAsset,
-		// contract, sending transactions and states
-		contract, send, isPending, txError
-	} = useMist(useProvider(), useSendTransaction({}));;
+  const {
+    // inputs state
+    valTo,
+    setTo,
+    valKey,
+    setKey,
+    // assets, selection and fetching
+    asset,
+    setAsset,
+    fetchAsset,
+    // contract, sending transactions and states
+    contract,
+    send,
+    isPending,
+    txError,
+  } = useMist(useProvider(), useSendTransaction({}));
 
-	// ...
-	// ...
-	// ...
+  // ...
+  // ...
+  // ...
 }
 ```
 
@@ -41,7 +49,7 @@ function MyComponent() {
 
 ```ts
 // More statuses will be added as more functionality is added
-type LoadingStatus = "FINDING_TX" | "READY";
+type LoadingStatus = 'FINDING_TX' | 'READY';
 
 export interface UseMistResult {
   chamberAddress: `0x${string}`;

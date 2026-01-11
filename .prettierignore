@@ -1,0 +1,11 @@
+node_modules
+dist
+build
+coverage
+.next
+*.min.js
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+go-dist
+*.wasm

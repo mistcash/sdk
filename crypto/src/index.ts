@@ -1,5 +1,5 @@
 export * from './merkle';
-import { poseidonHashBN254, initSync, init as initGaraga } from "garaga";
+import { poseidonHashBN254, initSync, init as initGaraga } from 'garaga';
 
 // Poseidon hash used in the circuits and the contract
 // Uses https://github.com/keep-starknet-strange/garaga
@@ -12,7 +12,7 @@ export async function hash(a: bigint, b: bigint): Promise<bigint> {
     try {
       return poseidonHashBN254(a, b);
     } catch (error) {
-      console.error("Failed hashing with garaga.");
+      console.error('Failed hashing with garaga.');
       throw error;
     }
   }
@@ -29,7 +29,12 @@ export async function txSecret(key: string, to: string): Promise<bigint> {
 
 // This returns the full hash of the transaction which is present on the merkle tree
 // This can be used to verify that a transaction exists
-export async function txHash(valKey: string, valTo: string, tokenAddr: string, amount: string): Promise<bigint> {
+export async function txHash(
+  valKey: string,
+  valTo: string,
+  tokenAddr: string,
+  amount: string,
+): Promise<bigint> {
   const tx_secret = await txSecret(valKey, valTo);
   const tx_hash = await hash(await hash(tx_secret, BigInt(tokenAddr)), BigInt(amount));
   return tx_hash % 2n == 1n ? tx_hash - 1n : tx_hash;
