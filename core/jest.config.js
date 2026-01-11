@@ -9,10 +9,8 @@ module.exports = {
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/**/*.test.ts', '!src/**/*.spec.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   globals: {
-    'ts-jest': {
-      tsconfig: {
-        esModuleInterop: true,
-      },
-    },
+    '^.+\.ts$': ['ts-jest', {
+      tsconfig: { esModuleInterop: true }
+    }]
   },
 };

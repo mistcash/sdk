@@ -78,7 +78,7 @@ export function decode${var_name}(): Uint8Array {
  * Get the WASM binary as ArrayBuffer
  */
 export function get${var_name}Buffer(): ArrayBuffer {
-  return decode${var_name}().buffer;
+  return decode${var_name}().buffer as ArrayBuffer;
 }
 EOF
   
@@ -88,14 +88,34 @@ EOF
 # Embed main.wasm
 embed_wasm \
   "$GO_DIST_DIR/main.wasm" \
-  "$CORE_SRC_DIR/wasm-main.embedded.ts" \
+  "$CORE_SRC_DIR/goWasm/wasm-main.embedded.ts" \
   "MAIN_WASM"
+
+# Copy wasm_exec.js to core/src for easy import
+if [ -f "$GO_DIST_DIR/wasm_exec.js" ]; then
+  cp "$GO_DIST_DIR/wasm_exec.js" "$CORE_SRC_DIR/goWasm/wasm_exec.js"
+  echo "✅ Copied wasm_exec.js to $CORE_SRC_DIR/goWasm/wasm_exec.js"
+  
+  # Also create a TypeScript declaration file if it doesn't exist
+  if [ ! -f "$CORE_SRC_DIR/goWasm/wasm_exec.d.ts" ]; then
+    cat > "$CORE_SRC_DIR/goWasm/wasm_exec.d.ts" << 'EOF'
+/**
+ * Type definitions for wasm_exec.js
+ * This file is generated/copied by scripts/embed-wasm.sh
+ */
+
+declare global {
+  var Go: any;
+}
+
+export {};
+EOF
+    echo "✅ Created wasm_exec.d.ts type definitions"
+  fi
+else
+  echo "⚠️  Warning: wasm_exec.js not found in $GO_DIST_DIR"
+fi
 
 echo ""
 echo "✨ Successfully embedded all WASM files!"
-echo ""
-echo "📝 Next steps:"
-echo "   1. Update loader.node.ts to use the embedded WASM"
-echo "   2. Update loader.browser.ts to use the embedded WASM"
-echo "   3. Add 'prepare' script to package.json to run this before build"
 echo ""

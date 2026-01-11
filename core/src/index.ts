@@ -1,7 +1,12 @@
 // Main entry point with environment detection
 import type { WasmInstance, WasmExports } from './types';
 
+import * as nodeLoader from './loaders/nodeLoader'
+import * as browserLoader from './loaders/browserLoader'
+
 // Re-export types
+export * from './dev';
+export * from './utils';
 export * from './types';
 
 // Platform-specific loader - will be resolved by bundler
@@ -37,13 +42,7 @@ async function loadLoader() {
 
   const env = detectEnvironment();
 
-  if (env === 'node') {
-    loaderModule = await import('./loader.node.js');
-  } else {
-    loaderModule = await import('./loader.browser.js');
-  }
-
-  return loaderModule;
+  return env === 'node' ? nodeLoader : browserLoader;
 }
 
 /**

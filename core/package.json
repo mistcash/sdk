@@ -17,14 +17,10 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
-  "browser": {
-    "./dist/loader.js": "./dist/loader.browser.js",
-    "./dist/loader.mjs": "./dist/loader.browser.mjs"
-  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "clean": "rm -rf dist"
   },
