@@ -1,4 +1,4 @@
-import { isWasmInitialized, resetWasm, initWasm } from '..';
+import { initWasm } from '..';
 
 const FIXTURE_WITNESS = {
   ClaimingKey: '0x6162726163616461627261',

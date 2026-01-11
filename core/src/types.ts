@@ -19,5 +19,7 @@ export interface WasmInstance {
  * Exported functions from WASM
  */
 export interface WasmExports {
-  [key: string]: any;
+  prove: (witness: string) => Promise<string>;
+  hash2: (left: string, right: string) => Promise<string>;
+  hash3: (a: string, b: string, c: string) => Promise<string>;
 }
