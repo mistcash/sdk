@@ -1,8 +1,8 @@
 // Main entry point with environment detection
 import type { WasmInstance, WasmExports } from './types';
 
-import * as nodeLoader from './loaders/nodeLoader'
-import * as browserLoader from './loaders/browserLoader'
+import * as nodeLoader from './loaders/nodeLoader';
+import * as browserLoader from './loaders/browserLoader';
 
 // Re-export types
 export * from './dev';

@@ -4,7 +4,7 @@
  */
 
 declare global {
-	var Go: any;
+  var Go: any;
 }
 
-export { };
+export {};
