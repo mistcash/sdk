@@ -1,7 +1,7 @@
 // Node.js-specific WASM loader
-import * as fs from 'fs';
 import * as path from 'path';
 import type { WasmInstance, WasmExports } from './types';
+import { decodeMAIN_WASM } from './wasm-main.embedded';
 
 // Declare global Go interface
 declare global {
@@ -54,16 +54,20 @@ export async function initWasm(wasmPath?: string): Promise<WasmInstance> {
 
     const go = new globalThis.Go();
 
-    // Default path or custom path
-    const defaultPath = path.join(__dirname, '../../go-dist/main.wasm');
-    const finalPath = wasmPath || defaultPath;
+    // Use embedded WASM by default, or load from custom path if provided
+    let wasmBuffer: Uint8Array | Buffer;
 
-    // Load WASM file
-    let wasmBuffer: Buffer;
-    try {
-      wasmBuffer = fs.readFileSync(finalPath);
-    } catch (error) {
-      throw new Error(`Failed to read WASM file from ${finalPath}: ${error}`);
+    if (wasmPath) {
+      // Load from custom path if provided (for backward compatibility)
+      const fs = require('fs');
+      try {
+        wasmBuffer = fs.readFileSync(wasmPath);
+      } catch (error) {
+        throw new Error(`Failed to read WASM file from ${wasmPath}: ${error}`);
+      }
+    } else {
+      // Use embedded WASM (default)
+      wasmBuffer = decodeMAIN_WASM();
     }
 
     const result = await WebAssembly.instantiate(wasmBuffer, go.importObject);

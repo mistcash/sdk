@@ -1,5 +1,6 @@
 // Browser-specific WASM loader
 import type { WasmInstance, WasmExports } from './types';
+import { decodeMAIN_WASM } from './wasm-main.embedded';
 
 // Declare global Go interface
 declare global {
@@ -51,20 +52,24 @@ export async function initWasm(wasmPath?: string): Promise<WasmInstance> {
 
     const go = new globalThis.Go();
 
-    // Default path or custom path
-    const path = wasmPath || '/main.wasm';
-
+    // Use embedded WASM by default, or fetch from custom path if provided
     let wasmBuffer: ArrayBuffer;
 
-    // Try to load using fetch
-    try {
-      const response = await fetch(path);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch WASM: ${response.statusText}`);
+    if (wasmPath) {
+      // Fetch from custom path if provided (for backward compatibility)
+      try {
+        const response = await fetch(wasmPath);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch WASM: ${response.statusText}`);
+        }
+        wasmBuffer = await response.arrayBuffer();
+      } catch (error) {
+        throw new Error(`Failed to load WASM file from ${wasmPath}: ${error}`);
       }
-      wasmBuffer = await response.arrayBuffer();
-    } catch (error) {
-      throw new Error(`Failed to load WASM file from ${path}: ${error}`);
+    } else {
+      // Use embedded WASM (default)
+      const wasmData = decodeMAIN_WASM();
+      wasmBuffer = wasmData.buffer as ArrayBuffer;
     }
 
     const result = await WebAssembly.instantiate(wasmBuffer, go.importObject);
