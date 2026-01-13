@@ -1,7 +1,36 @@
 import { AccountInterface, Contract, ProviderInterface, Uint256 } from 'starknet';
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
-import { txSecret, txHash } from '@mistcash/crypto';
 import { Asset } from './gnark/types';
+import { hash2, hash2Sync, hash3Sync } from './gnark';
+
+export function txSecret(key: string, to: string): string {
+  return hash2Sync(key, to);
+}
+
+// This returns the full hash of the transaction which is present on the merkle tree
+// This can be used to verify that a transaction exists
+
+export function hash_with_asset(secrets_hash: string, asset: string, amount: string): string {
+  return hash3Sync(secrets_hash, asset, amount)
+}
+
+export function txHash(key: string, owner: string, tokenAddr: string, amount: string,): bigint {
+  const tx_secret = txSecret(key, owner);
+  return BigInt(hash_with_asset(tx_secret, tokenAddr, amount));
+}
+
+export function generateClaimingKey(): string {
+  let max = 2 ** 48; // Max precision for JS Math.random is 52 bits
+  const keyParts = [
+    Math.floor(Math.random() * max).toString(16),
+    Math.floor(Math.random() * max).toString(16),
+    Math.floor(Math.random() * max).toString(16),
+    Math.floor(Math.random() * max).toString(16),
+    Math.floor(Math.random() * max).toString(16),
+  ];
+  const key = '0x' + keyParts.join('');
+  return key;
+}
 
 /**
  * Returns Chamber starknet contract
