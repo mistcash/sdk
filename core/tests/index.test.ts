@@ -1,44 +1,7 @@
 import { hash3, hash2, prove_groth16, initWasm, initCore } from '..';
-import { full_prove } from '../src';
+import { full_prove, FIXTURES } from '../src';
 
-const FIXTURE_WITNESS = {
-  ClaimingKey: '0x6162726163616461627261',
-  Owner: '0x6a6f65',
-  TxAsset: {
-    amount: '100000',
-    addr: '0x2877e73feb5b7af1e12db1ff5b15db30ffa42182406241f672e9e611f42f3e1',
-  },
-  MerkleProof: [
-    '0x2cf31da613176ebbb3cf535bf414f28176bd29f1ea264db339391b66d555989c',
-    '0x2f2c4d50de48b60a8188793052bbc92f2a381d066ff0d0fe1aee993f30fdb75c',
-    '0x25ace6f1331e9d018407e5320eed5834f817618e7801ec5e59632e7eed9f2e40',
-    '0x2495d8b88166a1e5131b8273f2ac1e2d21de892372c5e7d55bd8bdb88b420f5',
-    '0x13c4a99c0082800866b2180df94ed9c3664210ac3717c51bbb3184a3ec64da8e',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-    '0',
-  ],
-  Withdraw: {
-    amount: '97500',
-    addr: '0x2877e73feb5b7af1e12db1ff5b15db30ffa42182406241f672e9e611f42f3e1',
-  },
-  MerkleRoot: '0x1935947da594b4bc039293afa3a32bd696b5896bca7a427fc2162a7d50ae860b',
-  Nullifier: '0xb18d87552c5be0d021374ee6ba3b1d4dcfe8ac1af6a8a331d9598fec500642f',
-  NewTxSecret: '0x10934cf94af9fbb0fcd67fc9ee6da318ebcab9971de1fbb249e1c882cf2ac755',
-  NewTx: '0x1149e3056e43be4d8dc0ec673b01bb11a46933aad2b3237c81c993bdceca251e',
-};
+const FIXTURE_WITNESS = FIXTURES.WITNESS;
 
 describe('@mistcash/sdk', () => {
   describe('load wasm', () => {

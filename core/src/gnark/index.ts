@@ -1,7 +1,14 @@
-import { ProofResponse, WasmExports, WasmInstance, Witness } from '../types';
+import { ProofResponse, WasmExports, WasmInstance } from './types';
 import { decodeMAIN_WASM } from './wasm-main.embedded';
 import './wasm_exec.js';
-export { default as vkJson } from './vk.json';
+import WITNESS from './assignment.json';
+import VK from './vk.json';
+import PROOF from './proof.json';
+export * from './types';
+const FIXTURES = { WITNESS, VK, PROOF }
+export { FIXTURES };
+
+export type Witness = typeof FIXTURES.WITNESS;
 
 // Shared state management
 let wasmInstance: WasmInstance | null = null;

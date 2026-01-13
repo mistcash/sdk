@@ -1,7 +1,7 @@
 import { AccountInterface, Contract, ProviderInterface, Uint256 } from 'starknet';
 import { CHAMBER_ABI, CHAMBER_ADDR_MAINNET, ChamberTypedContract } from '@mistcash/config';
 import { txSecret, txHash } from '@mistcash/crypto';
-import { Asset } from './types';
+import { Asset } from './gnark/types';
 
 /**
  * Returns Chamber starknet contract

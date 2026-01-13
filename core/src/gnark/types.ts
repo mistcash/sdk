@@ -39,18 +39,6 @@ export interface Proof {
   CommitmentPok: Point;
 }
 
-export interface Witness {
-  ClaimingKey: string;
-  Owner: string;
-  TxAsset: Asset;
-  MerkleProof: string[];
-  Withdraw: Asset;
-  MerkleRoot: string;
-  Nullifier: string;
-  NewTxSecret: string;
-  NewTx: string;
-}
-
 export interface ErrorResponse {
   status: 'error';
   error: string;
