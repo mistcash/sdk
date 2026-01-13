@@ -1,4 +1,4 @@
-import { calculateMerkleRoot, calculateMerkleRootAndProof, merkleRootFromPath } from '..';
+import { calculateMerkleRoot, calculateMerkleRootAndProof, merkleRootFromPath } from '../src/index';
 import { init, poseidonHashBN254 } from 'garaga';
 
 const maybePoseidonHash254 = (left: bigint, right: bigint): bigint => {

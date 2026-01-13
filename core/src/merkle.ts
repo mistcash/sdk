@@ -10,8 +10,7 @@ export function merkleHasher(left: bigint, right: bigint): bigint {
     right = temp;
   }
 
-  const node = left == 0n ? right : BigInt(hash2Sync(left.toString(), right.toString()));
-  return node % 2n == 0n ? node + 1n : node;
+  return left == 0n ? right : BigInt(hash2Sync(left.toString(), right.toString()));
 }
 
 export function evenLeafFilter(leaf: bigint): bigint {
@@ -21,8 +20,8 @@ export function evenLeafFilter(leaf: bigint): bigint {
 // write merkle root calculator
 export function calculateMerkleRoot(
   leaves: bigint[],
-  hasher: HasherFn = merkleHasher,
-  leafFilter: LeafFilterFn = evenLeafFilter,
+  hasher: HasherFn = merkleHasher, // Default hasher, gnark hash2
+  leafFilter: LeafFilterFn = a => a, // No filetering by default
 ): bigint {
   let tree = leaves.map(leafFilter);
   while (tree.length > 1) {
@@ -39,7 +38,7 @@ export function merkleRootFromPath(
   element: bigint,
   path: bigint[],
   hasher: HasherFn = merkleHasher,
-  leafFilter: LeafFilterFn = evenLeafFilter,
+  leafFilter: LeafFilterFn = a => a,
 ): bigint {
   let el = leafFilter(element);
   for (let i = 0; i < path.length; i++) {
@@ -53,7 +52,7 @@ export function calculateMerkleRootAndProof(
   leaves: bigint[],
   index: number,
   hasher: HasherFn = merkleHasher,
-  leafFilter: LeafFilterFn = evenLeafFilter,
+  leafFilter: LeafFilterFn = a => a,
 ): bigint[] {
   let tree = leaves.map(leafFilter);
   const proof: bigint[] = [];

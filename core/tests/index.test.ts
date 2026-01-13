@@ -1,5 +1,4 @@
-import { hash3, hash2, prove_groth16, initWasm, initCore } from '..';
-import { full_prove, FIXTURES } from '../src';
+import { full_prove, FIXTURES, hash3, hash2, prove_groth16, initWasm, initCore } from '../src/index';
 
 const FIXTURE_WITNESS = FIXTURES.WITNESS;
 
