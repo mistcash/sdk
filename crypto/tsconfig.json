@@ -4,5 +4,10 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "../core/src/merkle.ts",
+    "../core/tests/merkle.test.ts"
+  ]
 }
