@@ -89,11 +89,11 @@ export async function prove_groth16(witness: Witness): Promise<ProofResponse> {
  * Calls 2-way hash function from WASM module
  * @param a
  * @param b
- * @returns 
+ * @returns {Promise<string>}
  */
 export async function hash2(a: string, b: string): Promise<string> {
   let { hash2 } = await initWasm();
-  return await hash2(a, b);
+  return hash2(a, b);
 }
 
 /**
@@ -101,9 +101,32 @@ export async function hash2(a: string, b: string): Promise<string> {
  * @param a
  * @param b
  * @param c
- * @returns 
+ * @returns {Promise<string>}
  */
 export async function hash3(a: string, b: string, c: string): Promise<string> {
   let { hash3 } = await initWasm();
-  return await hash3(a, b, c);
+  return hash3(a, b, c);
+}
+
+/**
+ * Calls 2-way hash function from WASM module
+ * @param a
+ * @param b
+ * @returns {Promise<string>}
+ */
+export function hash2Sync(a: string, b: string): string {
+  let { hash2 } = pluckExportFunctions();
+  return hash2(a, b);
+}
+
+/**
+ * Calls 3-way hash function from WASM module
+ * @param a
+ * @param b
+ * @param c
+ * @returns {Promise<string>}
+ */
+export function hash3Sync(a: string, b: string, c: string): string {
+  let { hash3 } = pluckExportFunctions();
+  return hash3(a, b, c);
 }

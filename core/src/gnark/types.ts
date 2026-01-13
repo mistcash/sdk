@@ -58,6 +58,6 @@ export type ProofResponse = ErrorResponse | SuccessResponse;
  */
 export interface WasmExports {
   prove: (witness: string) => Promise<ProofResponse>;
-  hash2: (left: string, right: string) => Promise<string>;
-  hash3: (a: string, b: string, c: string) => Promise<string>;
+  hash2: (left: string, right: string) => string;
+  hash3: (a: string, b: string, c: string) => string;
 }
