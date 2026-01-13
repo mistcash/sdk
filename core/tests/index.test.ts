@@ -48,7 +48,7 @@ describe('@mistcash/sdk', () => {
       const startTime = performance.now();
       const proofSuccess = await prove_groth16(FIXTURE_WITNESS);
       const endTime = performance.now();
-      console.log(`Proof generation took ${(endTime - startTime).toFixed(2)} ms`);
+      // console.log(`Proof generation took ${(endTime - startTime).toFixed(2)} ms`);
 
       expect(proofSuccess.status).toBe('success');
       if (proofSuccess.status === 'success') {
@@ -66,7 +66,7 @@ describe('@mistcash/sdk', () => {
       const startTime = performance.now();
       const proofCalldata = await full_prove(FIXTURE_WITNESS);
       const endTime = performance.now();
-      console.log(`Proof+Calldata generation took ${(endTime - startTime).toFixed(2)} ms`);
+      // console.log(`Proof+Calldata generation took ${(endTime - startTime).toFixed(2)} ms`);
 
       expect(proofCalldata.length).toBeGreaterThan(0);
     });

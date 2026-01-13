@@ -6,9 +6,12 @@ export * from './gnark';
 // Garaga utils
 export * from './garaga';
 
-// Dev utils
+// Utils
 export * from './dev';
 export * from './utils';
+
+// Merkle tree
+export * from './merkle';
 
 export async function initCore(): Promise<void> {
   await initWasm();
