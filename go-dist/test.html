@@ -11,7 +11,7 @@
     <button id="testBtn">Test Prover</button>
     <pre id="output"></pre>
 
-    <script src="./wasm_exec.js"></script>
+    <script src="/wasm_exec.js"></script>
     <script>
         const output = document.getElementById('output');
         const log = (msg) => {
@@ -25,7 +25,6 @@
 
             try {
                 const startLoad = performance.now();
-                let windowBefore = Object.keys(window);
                 const go = new Go();
                 const result = await WebAssembly.instantiateStreaming(
                     fetch('/main.wasm'),
@@ -47,8 +46,8 @@
                     // Call your exported functions here
                 } else {
                     log('⚠ prove function not found');
+                    log('Available globals: ' + Object.keys(window).filter(k => k.startsWith('prove')).join(', '));
                 }
-                log('Available globals: ' + Object.keys(window).filter(k => windowBefore.indexOf(k) === -1).join(', '));
 
             } catch (error) {
                 log('✗ Error: ' + error.message);
