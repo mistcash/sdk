@@ -1,440 +1,486 @@
 import { Abi, TypedContractV2 } from 'starknet';
 
 export const CHAMBER_ADDR_MAINNET = (process.env.CHAMBER_ADDR_MAINNET ||
-  '0x063eab2f19523fc8578c66a3ddf248d72094c65154b6dd7680b6e05a64845277') as `0x${string}`;
+  '0x03a889eb7aecedcb76b987fc981ad3b92689cf45bffec8c1c409a4b0b79c3f31') as `0x${string}`;
 
 export const CHAMBER_ABI = [
   {
-    type: 'impl',
-    name: 'UpgradeableImpl',
-    interface_name: 'openzeppelin_upgrades::interface::IUpgradeable',
+    "type": "impl",
+    "name": "UpgradeableImpl",
+    "interface_name": "openzeppelin_upgrades::interface::IUpgradeable"
   },
   {
-    type: 'interface',
-    name: 'openzeppelin_upgrades::interface::IUpgradeable',
-    items: [
+    "type": "interface",
+    "name": "openzeppelin_upgrades::interface::IUpgradeable",
+    "items": [
       {
-        type: 'function',
-        name: 'upgrade',
-        inputs: [
+        "type": "function",
+        "name": "upgrade",
+        "inputs": [
           {
-            name: 'new_class_hash',
-            type: 'core::starknet::class_hash::ClassHash',
-          },
+            "name": "new_class_hash",
+            "type": "core::starknet::class_hash::ClassHash"
+          }
         ],
-        outputs: [],
-        state_mutability: 'external',
-      },
-    ],
+        "outputs": [],
+        "state_mutability": "external"
+      }
+    ]
   },
   {
-    type: 'impl',
-    name: 'IChamberImpl',
-    interface_name: 'contracts::multi_asset::IChamber',
+    "type": "impl",
+    "name": "IChamberImpl",
+    "interface_name": "contracts::chamber::IChamber"
   },
   {
-    type: 'struct',
-    name: 'core::integer::u256',
-    members: [
+    "type": "struct",
+    "name": "core::integer::u256",
+    "members": [
       {
-        name: 'low',
-        type: 'core::integer::u128',
+        "name": "low",
+        "type": "core::integer::u128"
       },
       {
-        name: 'high',
-        type: 'core::integer::u128',
-      },
-    ],
+        "name": "high",
+        "type": "core::integer::u128"
+      }
+    ]
   },
   {
-    type: 'struct',
-    name: 'contracts::multi_asset::Asset',
-    members: [
+    "type": "struct",
+    "name": "contracts::chamber::Asset",
+    "members": [
       {
-        name: 'amount',
-        type: 'core::integer::u256',
+        "name": "amount",
+        "type": "core::integer::u256"
       },
       {
-        name: 'addr',
-        type: 'core::starknet::contract_address::ContractAddress',
-      },
-    ],
+        "name": "addr",
+        "type": "core::starknet::contract_address::ContractAddress"
+      }
+    ]
   },
   {
-    type: 'struct',
-    name: 'core::array::Span::<core::integer::u256>',
-    members: [
+    "type": "struct",
+    "name": "core::array::Span::<core::integer::u256>",
+    "members": [
       {
-        name: 'snapshot',
-        type: '@core::array::Array::<core::integer::u256>',
-      },
-    ],
+        "name": "snapshot",
+        "type": "@core::array::Array::<core::integer::u256>"
+      }
+    ]
   },
   {
-    type: 'struct',
-    name: 'core::array::Span::<core::felt252>',
-    members: [
+    "type": "struct",
+    "name": "core::array::Span::<core::felt252>",
+    "members": [
       {
-        name: 'snapshot',
-        type: '@core::array::Array::<core::felt252>',
-      },
-    ],
+        "name": "snapshot",
+        "type": "@core::array::Array::<core::felt252>"
+      }
+    ]
   },
   {
-    type: 'interface',
-    name: 'contracts::multi_asset::IChamber',
-    items: [
+    "type": "enum",
+    "name": "core::bool",
+    "variants": [
       {
-        type: 'function',
-        name: 'deposit',
-        inputs: [
+        "name": "False",
+        "type": "()"
+      },
+      {
+        "name": "True",
+        "type": "()"
+      }
+    ]
+  },
+  {
+    "type": "struct",
+    "name": "verifier_contracts::groth16_verifier::IGroth16VerifierBN254Dispatcher",
+    "members": [
+      {
+        "name": "contract_address",
+        "type": "core::starknet::contract_address::ContractAddress"
+      }
+    ]
+  },
+  {
+    "type": "interface",
+    "name": "contracts::chamber::IChamber",
+    "items": [
+      {
+        "type": "function",
+        "name": "deposit",
+        "inputs": [
           {
-            name: 'hash',
-            type: 'core::integer::u256',
+            "name": "hash",
+            "type": "core::integer::u256"
           },
           {
-            name: 'asset',
-            type: 'contracts::multi_asset::Asset',
-          },
+            "name": "asset",
+            "type": "contracts::chamber::Asset"
+          }
         ],
-        outputs: [],
-        state_mutability: 'external',
+        "outputs": [],
+        "state_mutability": "external"
       },
       {
-        type: 'function',
-        name: 'withdraw_no_zk',
-        inputs: [
+        "type": "function",
+        "name": "withdraw_no_zk",
+        "inputs": [
           {
-            name: 'claiming_key',
-            type: 'core::integer::u256',
+            "name": "claiming_key",
+            "type": "core::integer::u256"
           },
           {
-            name: 'recipient',
-            type: 'core::starknet::contract_address::ContractAddress',
+            "name": "recipient",
+            "type": "core::starknet::contract_address::ContractAddress"
           },
           {
-            name: 'asset',
-            type: 'contracts::multi_asset::Asset',
+            "name": "asset",
+            "type": "contracts::chamber::Asset"
           },
           {
-            name: 'proof',
-            type: 'core::array::Span::<core::integer::u256>',
-          },
+            "name": "proof",
+            "type": "core::array::Span::<core::integer::u256>"
+          }
         ],
-        outputs: [],
-        state_mutability: 'external',
+        "outputs": [],
+        "state_mutability": "external"
       },
       {
-        type: 'function',
-        name: 'seek_and_hide_no_zk',
-        inputs: [
+        "type": "function",
+        "name": "seek_and_hide_no_zk",
+        "inputs": [
           {
-            name: 'claiming_key',
-            type: 'core::integer::u256',
+            "name": "claiming_key",
+            "type": "core::integer::u256"
           },
           {
-            name: 'recipient',
-            type: 'core::starknet::contract_address::ContractAddress',
+            "name": "recipient",
+            "type": "core::starknet::contract_address::ContractAddress"
           },
           {
-            name: 'asset',
-            type: 'contracts::multi_asset::Asset',
+            "name": "asset",
+            "type": "contracts::chamber::Asset"
           },
           {
-            name: 'proof',
-            type: 'core::array::Span::<core::integer::u256>',
+            "name": "proof",
+            "type": "core::array::Span::<core::integer::u256>"
           },
           {
-            name: 'new_tx_secret',
-            type: 'core::integer::u256',
+            "name": "new_tx_secret",
+            "type": "core::integer::u256"
           },
           {
-            name: 'new_tx_amount',
-            type: 'core::integer::u256',
-          },
+            "name": "new_tx_amount",
+            "type": "core::integer::u256"
+          }
         ],
-        outputs: [],
-        state_mutability: 'external',
+        "outputs": [],
+        "state_mutability": "external"
       },
       {
-        type: 'function',
-        name: 'handle_zkp',
-        inputs: [
+        "type": "function",
+        "name": "handle_zkp",
+        "inputs": [
           {
-            name: 'proof',
-            type: 'core::array::Span::<core::felt252>',
-          },
+            "name": "proof",
+            "type": "core::array::Span::<core::felt252>"
+          }
         ],
-        outputs: [],
-        state_mutability: 'external',
+        "outputs": [],
+        "state_mutability": "external"
       },
       {
-        type: 'function',
-        name: 'tx_array',
-        inputs: [],
-        outputs: [
+        "type": "function",
+        "name": "tx_array",
+        "inputs": [],
+        "outputs": [
           {
-            type: 'core::array::Array::<core::integer::u256>',
-          },
+            "type": "core::array::Array::<core::integer::u256>"
+          }
         ],
-        state_mutability: 'view',
+        "state_mutability": "view"
       },
       {
-        type: 'function',
-        name: 'merkle_root',
-        inputs: [],
-        outputs: [
+        "type": "function",
+        "name": "merkle_root",
+        "inputs": [],
+        "outputs": [
           {
-            type: 'core::integer::u256',
-          },
+            "type": "core::integer::u256"
+          }
         ],
-        state_mutability: 'view',
+        "state_mutability": "view"
       },
       {
-        type: 'function',
-        name: 'merkle_proof',
-        inputs: [
+        "type": "function",
+        "name": "merkle_proof",
+        "inputs": [
           {
-            name: 'index',
-            type: 'core::integer::u32',
-          },
+            "name": "index",
+            "type": "core::integer::u32"
+          }
         ],
-        outputs: [
+        "outputs": [
           {
-            type: 'core::array::Span::<core::integer::u256>',
-          },
+            "type": "core::array::Span::<core::integer::u256>"
+          }
         ],
-        state_mutability: 'external',
+        "state_mutability": "external"
       },
       {
-        type: 'function',
-        name: 'merkle_leaves',
-        inputs: [
+        "type": "function",
+        "name": "merkle_leaves",
+        "inputs": [
           {
-            name: 'height',
-            type: 'core::integer::u32',
-          },
+            "name": "height",
+            "type": "core::integer::u32"
+          }
         ],
-        outputs: [
+        "outputs": [
           {
-            type: 'core::array::Array::<core::integer::u256>',
-          },
+            "type": "core::array::Array::<core::integer::u256>"
+          }
         ],
-        state_mutability: 'external',
+        "state_mutability": "external"
       },
-    ],
-  },
-  {
-    type: 'impl',
-    name: 'OwnableMixinImpl',
-    interface_name: 'openzeppelin_access::ownable::interface::OwnableABI',
-  },
-  {
-    type: 'interface',
-    name: 'openzeppelin_access::ownable::interface::OwnableABI',
-    items: [
       {
-        type: 'function',
-        name: 'owner',
-        inputs: [],
-        outputs: [
+        "type": "function",
+        "name": "assets_from_secret",
+        "inputs": [
           {
-            type: 'core::starknet::contract_address::ContractAddress',
-          },
+            "name": "tx_secret",
+            "type": "core::integer::u256"
+          }
         ],
-        state_mutability: 'view',
-      },
-      {
-        type: 'function',
-        name: 'transfer_ownership',
-        inputs: [
+        "outputs": [
           {
-            name: 'new_owner',
-            type: 'core::starknet::contract_address::ContractAddress',
-          },
+            "type": "contracts::chamber::Asset"
+          }
         ],
-        outputs: [],
-        state_mutability: 'external',
+        "state_mutability": "view"
       },
       {
-        type: 'function',
-        name: 'renounce_ownership',
-        inputs: [],
-        outputs: [],
-        state_mutability: 'external',
-      },
-      {
-        type: 'function',
-        name: 'transferOwnership',
-        inputs: [
+        "type": "function",
+        "name": "nullifiers_spent",
+        "inputs": [
           {
-            name: 'newOwner',
-            type: 'core::starknet::contract_address::ContractAddress',
-          },
+            "name": "nullifiers",
+            "type": "core::array::Array::<core::integer::u256>"
+          }
         ],
-        outputs: [],
-        state_mutability: 'external',
+        "outputs": [
+          {
+            "type": "core::array::Array::<core::bool>"
+          }
+        ],
+        "state_mutability": "view"
       },
       {
-        type: 'function',
-        name: 'renounceOwnership',
-        inputs: [],
-        outputs: [],
-        state_mutability: 'external',
+        "type": "function",
+        "name": "transactions_exist",
+        "inputs": [
+          {
+            "name": "transactions",
+            "type": "core::array::Array::<core::integer::u256>"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "core::array::Array::<core::bool>"
+          }
+        ],
+        "state_mutability": "view"
       },
-    ],
+      {
+        "type": "function",
+        "name": "setVerifierAddress",
+        "inputs": [
+          {
+            "name": "verifier",
+            "type": "verifier_contracts::groth16_verifier::IGroth16VerifierBN254Dispatcher"
+          }
+        ],
+        "outputs": [],
+        "state_mutability": "external"
+      },
+      {
+        "type": "function",
+        "name": "recalculate_merkle_root",
+        "inputs": [],
+        "outputs": [],
+        "state_mutability": "external"
+      }
+    ]
   },
   {
-    type: 'struct',
-    name: 'verifier_contracts::honk_verifier::IUltraStarknetZKHonkVerifierDispatcher',
-    members: [
-      {
-        name: 'contract_address',
-        type: 'core::starknet::contract_address::ContractAddress',
-      },
-    ],
+    "type": "impl",
+    "name": "OwnableMixinImpl",
+    "interface_name": "openzeppelin_access::ownable::interface::OwnableABI"
   },
   {
-    type: 'constructor',
-    name: 'constructor',
-    inputs: [
+    "type": "interface",
+    "name": "openzeppelin_access::ownable::interface::OwnableABI",
+    "items": [
       {
-        name: 'owner',
-        type: 'core::starknet::contract_address::ContractAddress',
+        "type": "function",
+        "name": "owner",
+        "inputs": [],
+        "outputs": [
+          {
+            "type": "core::starknet::contract_address::ContractAddress"
+          }
+        ],
+        "state_mutability": "view"
       },
       {
-        name: 'verifier',
-        type: 'verifier_contracts::honk_verifier::IUltraStarknetZKHonkVerifierDispatcher',
+        "type": "function",
+        "name": "transfer_ownership",
+        "inputs": [
+          {
+            "name": "new_owner",
+            "type": "core::starknet::contract_address::ContractAddress"
+          }
+        ],
+        "outputs": [],
+        "state_mutability": "external"
       },
-    ],
+      {
+        "type": "function",
+        "name": "renounce_ownership",
+        "inputs": [],
+        "outputs": [],
+        "state_mutability": "external"
+      },
+      {
+        "type": "function",
+        "name": "transferOwnership",
+        "inputs": [
+          {
+            "name": "newOwner",
+            "type": "core::starknet::contract_address::ContractAddress"
+          }
+        ],
+        "outputs": [],
+        "state_mutability": "external"
+      },
+      {
+        "type": "function",
+        "name": "renounceOwnership",
+        "inputs": [],
+        "outputs": [],
+        "state_mutability": "external"
+      }
+    ]
   },
   {
-    type: 'function',
-    name: 'read_tx',
-    inputs: [
+    "type": "constructor",
+    "name": "constructor",
+    "inputs": [
       {
-        name: 'tx_hash',
-        type: 'core::integer::u256',
+        "name": "owner",
+        "type": "core::starknet::contract_address::ContractAddress"
       },
-    ],
-    outputs: [
       {
-        type: 'contracts::multi_asset::Asset',
-      },
-    ],
-    state_mutability: 'view',
+        "name": "verifier",
+        "type": "verifier_contracts::groth16_verifier::IGroth16VerifierBN254Dispatcher"
+      }
+    ]
   },
   {
-    type: 'function',
-    name: 'setVerifierAddress',
-    inputs: [
+    "type": "event",
+    "name": "openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferred",
+    "kind": "struct",
+    "members": [
       {
-        name: 'verifier',
-        type: 'verifier_contracts::honk_verifier::IUltraStarknetZKHonkVerifierDispatcher',
+        "name": "previous_owner",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "key"
       },
-    ],
-    outputs: [],
-    state_mutability: 'external',
+      {
+        "name": "new_owner",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "key"
+      }
+    ]
   },
   {
-    type: 'function',
-    name: 'recalculate_merkle_root',
-    inputs: [],
-    outputs: [],
-    state_mutability: 'external',
+    "type": "event",
+    "name": "openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferStarted",
+    "kind": "struct",
+    "members": [
+      {
+        "name": "previous_owner",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "key"
+      },
+      {
+        "name": "new_owner",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "key"
+      }
+    ]
   },
   {
-    type: 'event',
-    name: 'openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferred',
-    kind: 'struct',
-    members: [
+    "type": "event",
+    "name": "openzeppelin_access::ownable::ownable::OwnableComponent::Event",
+    "kind": "enum",
+    "variants": [
       {
-        name: 'previous_owner',
-        type: 'core::starknet::contract_address::ContractAddress',
-        kind: 'key',
+        "name": "OwnershipTransferred",
+        "type": "openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferred",
+        "kind": "nested"
       },
       {
-        name: 'new_owner',
-        type: 'core::starknet::contract_address::ContractAddress',
-        kind: 'key',
-      },
-    ],
+        "name": "OwnershipTransferStarted",
+        "type": "openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferStarted",
+        "kind": "nested"
+      }
+    ]
   },
   {
-    type: 'event',
-    name: 'openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferStarted',
-    kind: 'struct',
-    members: [
+    "type": "event",
+    "name": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded",
+    "kind": "struct",
+    "members": [
       {
-        name: 'previous_owner',
-        type: 'core::starknet::contract_address::ContractAddress',
-        kind: 'key',
-      },
-      {
-        name: 'new_owner',
-        type: 'core::starknet::contract_address::ContractAddress',
-        kind: 'key',
-      },
-    ],
+        "name": "class_hash",
+        "type": "core::starknet::class_hash::ClassHash",
+        "kind": "data"
+      }
+    ]
   },
   {
-    type: 'event',
-    name: 'openzeppelin_access::ownable::ownable::OwnableComponent::Event',
-    kind: 'enum',
-    variants: [
+    "type": "event",
+    "name": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event",
+    "kind": "enum",
+    "variants": [
       {
-        name: 'OwnershipTransferred',
-        type: 'openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferred',
-        kind: 'nested',
-      },
-      {
-        name: 'OwnershipTransferStarted',
-        type: 'openzeppelin_access::ownable::ownable::OwnableComponent::OwnershipTransferStarted',
-        kind: 'nested',
-      },
-    ],
+        "name": "Upgraded",
+        "type": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded",
+        "kind": "nested"
+      }
+    ]
   },
   {
-    type: 'event',
-    name: 'openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded',
-    kind: 'struct',
-    members: [
+    "type": "event",
+    "name": "contracts::chamber::Chamber::Event",
+    "kind": "enum",
+    "variants": [
       {
-        name: 'class_hash',
-        type: 'core::starknet::class_hash::ClassHash',
-        kind: 'data',
-      },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event',
-    kind: 'enum',
-    variants: [
-      {
-        name: 'Upgraded',
-        type: 'openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded',
-        kind: 'nested',
-      },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'contracts::multi_asset::Chamber::Event',
-    kind: 'enum',
-    variants: [
-      {
-        name: 'OwnableEvent',
-        type: 'openzeppelin_access::ownable::ownable::OwnableComponent::Event',
-        kind: 'flat',
+        "name": "OwnableEvent",
+        "type": "openzeppelin_access::ownable::ownable::OwnableComponent::Event",
+        "kind": "flat"
       },
       {
-        name: 'UpgradeableEvent',
-        type: 'openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event',
-        kind: 'flat',
-      },
-    ],
-  },
+        "name": "UpgradeableEvent",
+        "type": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event",
+        "kind": "flat"
+      }
+    ]
+  }
 ] as const satisfies Abi;
 
 export const ERC20_ABI = [
