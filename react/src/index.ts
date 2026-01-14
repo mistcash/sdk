@@ -113,7 +113,7 @@ export function useMist(
     const tx1 = hash_with_asset(
       new_tx_secret,
       BigInt(asset.addr).toString(),
-      BigInt(asset.amount).toString(),
+      newTxAmt.toString(),
     );
     const tx_index = txLeaves.indexOf(tx_hash);
     const merkleProofWRoot = calculateMerkleRootAndProof(txLeaves, tx_index);
@@ -154,6 +154,7 @@ export function useMist(
         throw 'contract not set up!';
       }
     } catch (error) {
+      console.log(`Proof witness: ${JSON.stringify(witness, null, 2)}`);
       console.error('Failed to process withdraw:', error);
     }
   }
