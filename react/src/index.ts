@@ -1,20 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { devStr, devVal, Asset, fetchTxAssets, getChamber } from '@mistcash/sdk';
-import {
-  StarknetTypedContract,
-  UseProviderResult,
-  UseSendTransactionResult,
-} from '@starknet-react/core';
+import { UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
+import { CHAMBER_ADDR_MAINNET, ChamberTypedContract, } from '@mistcash/config';
+import { full_prove, hash_with_asset, Witness } from '@mistcash/sdk';
+import { calculateMerkleRootAndProof, txHash, txSecret } from '@mistcash/sdk';
+import { devStr, devVal, Asset, fetchTxAssets, getChamber, initCore } from '@mistcash/sdk';
 import { Call, ProviderInterface } from 'starknet';
-import {
-  CHAMBER_ABI,
-  CHAMBER_ADDR_MAINNET,
-  ChamberTypedContract,
-  WitnessData,
-} from '@mistcash/config';
-import { useNoirProof } from './useNoir';
-import { calculateMerkleRootAndProof, txHash, txSecret } from '@mistcash/crypto';
-import { init as initGaraga, poseidonHashBN254 } from 'garaga';
 
 export interface UseMistResult {
   chamberAddress: `0x${string}`;
@@ -59,7 +49,6 @@ export function useMist(
   provider: ProviderInterface | UseProviderResult,
   sendTx: UseSendTransactionResult,
 ): UseMistResult {
-  const { generateCalldata, generateProof } = useNoirProof();
   const actualProvider = 'provider' in provider ? provider.provider : provider;
 
   const [txLeaves, setTxLeaves] = useState<bigint[]>([]);
@@ -94,7 +83,7 @@ export function useMist(
 
   useEffect(() => {
     (async () => {
-      initGaraga();
+      initCore();
       const leaves = (await contract?.tx_array()) as bigint[];
       setTxLeaves(leaves);
     })();
@@ -106,11 +95,23 @@ export function useMist(
     return leaves;
   }
   async function handleWithdraw(asset: Asset, new_tx_amount?: string) {
+    const newTxAmt = BigInt(new_tx_amount || 0);
     const merkle_root = (await contract?.merkle_root()) as bigint;
-    const new_tx_secret = await txSecret(valSnHKey, valSnHTo);
-    const tx_hash = await txHash(
+    const new_tx_secret = txSecret(valSnHKey, valSnHTo);
+    const tx_hash = txHash(
       valKey,
       valTo,
+      BigInt(asset.addr).toString(),
+      BigInt(asset.amount).toString(),
+    );
+    const nullifier = txHash(
+      (BigInt(valKey) + 1n).toString(),
+      valTo,
+      BigInt(asset.addr).toString(),
+      BigInt(asset.amount).toString(),
+    );
+    const tx1 = hash_with_asset(
+      new_tx_secret,
       BigInt(asset.addr).toString(),
       BigInt(asset.amount).toString(),
     );
@@ -120,22 +121,33 @@ export function useMist(
       .slice(0, merkleProofWRoot.length - 1)
       .map((bi) => bi.toString());
 
-    const witness = {
-      claiming_key: valKey,
-      recipient: valTo,
-      asset: {
-        amount: asset.amount.toString(),
-        addr: asset.addr,
+    const withdrawAmount = BigInt(asset.amount) - newTxAmt;
+
+    const witness: Witness = {
+      ClaimingKey: valKey,
+      Owner: valTo,
+      TxAsset: {
+        Amount: asset.amount.toString(),
+        Addr: asset.addr,
       },
-      proof: [...merkleProof, ...new Array(20 - merkleProof.length).fill('0')],
-      root: merkle_root.toString(),
-      new_tx_secret: new_tx_secret.toString(),
-      new_tx_amount,
+      MerkleProof: [...merkleProof, ...new Array(20 - merkleProof.length).fill('0')],
+      MerkleRoot: merkle_root.toString(),
+      Withdraw: {
+        Amount: withdrawAmount.toString(),
+        Addr: withdrawAmount == 0n ? '0' : asset.addr,
+      },
+      Nullifier: nullifier.toString(),
+      Tx1Secret: new_tx_secret.toString(),
+      Tx1: newTxAmt == 0n ? '0' : tx1,
+      Tx2Amount: '0',
+      Tx2Secret: '0',
+      Tx2: '0',
     };
 
+    console.log('Witness prepared:', witness);
+
     try {
-      const proof = await generateProof(witness as WitnessData);
-      const calldata = (await generateCalldata(proof)).slice(1);
+      const calldata = (await full_prove(witness)).slice(1);
       if (contract) {
         send([contract.populate('handle_zkp', [calldata])]);
       } else {
