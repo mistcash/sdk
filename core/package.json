@@ -27,14 +27,14 @@
   "dependencies": {
     "@mistcash/config": "workspace:*",
     "garaga": "^1.0.1",
-    "starknet": "^8.9.0"
+    "starknet": "^9.2.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
-    "@types/node": "^20.19.28",
-    "jest": "^29.5.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0"
+    "@types/node": "^20.19.29",
+    "jest": "^29.7.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
   },
   "files": [
     "dist",
