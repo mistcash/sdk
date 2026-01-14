@@ -2,18 +2,6 @@
 
 A TypeScript SDK for interacting with MIST.cash - a privacy-focused protocol on Starknet.
 
-We are facilitating two [workflows](readme-workflows.md),
-
-1. [Frontend Integration](readme-workflows.md#1-submit-transaction-flow),
-   - to build ui to create private payments
-   - probaby to your own account
-   - with strutured data generating your tx secret
-2. [Backend integration](readme-workflows.md#2-verify-transaction-flow),
-   - receive request when payment is made
-   - receive transaction secret preimage (strutured data)
-   - verify transaction addressed to you was created
-   - keep records of processed transactions to avoid double spending on your backend
-
 ## Overview
 
 The MIST SDK is a monorepo containing multiple packages that provide different layers of functionality for building applications with MIST.cash:
@@ -27,9 +15,6 @@ The MIST SDK is a monorepo containing multiple packages that provide different l
 - **[@mistcash/config](./config)** - Configuration, ABIs, and contract addresses, tokens  
    [npmjs.com/@mistcash/config](https://www.npmjs.com/package/@mistcash/config)
 
-- **[@mistcash/crypto](./crypto)** - Cryptographic operations for transaction privacy  
-   [npmjs.com/@mistcash/crypto](https://www.npmjs.com/package/@mistcash/crypto)
-
 ## Quick Start
 
 ### For React Applications
@@ -38,56 +23,15 @@ The MIST SDK is a monorepo containing multiple packages that provide different l
 pnpm add @mistcash/react
 ```
 
-```tsx
-import { useMist } from '@mistcash/react';
-import { useProvider, useSendTransaction } from '@starknet-react/core';
-
-function MyComponent() {
-  const {
-    valTo,
-    setTo,
-    valKey,
-    setKey, // input state vars
-    asset,
-    setAsset, // asset selection and data
-    contract,
-    send,
-    isPending,
-    txError, // contract and transactions
-  } = useMist(useProvider(), useSendTransaction({}));
-
-  // Your component logic here
-}
-```
+#### 📝 TODO
 
 ### For Non-React Applications/Backends
 
 ```bash
-pnpm add @mistcash/sdk @mistcash/crypto
+pnpm add @mistcash/sdk
 ```
 
-```typescript
-import { getChamber, fetchTxAssets, checkTxExists } from '@mistcash/sdk';
-import { txSecret, txHash } from '@mistcash/crypto';
-
-// obtain provider
-
-// Initialize contract
-const contract = getChamber(provider);
-
-// Generate transaction secret
-const secret = await txSecret(valKey, valTo);
-
-// Fetch transaction assets
-// ⚠️ transaction assets might not be public
-// ⚠️ use checkTxExists to find fully private transactions
-const asset = await fetchTxAssets(contract, valKey, valTo);
-
-// Check if a transaction with specified assets exists
-// 🟢 Some transactions have their assets private
-// 🟡 fully private transactions need all the details
-const txExists = await checkTxExists(contract, claimingKey, recipient, tokenAddr, amount);
-```
+#### 📝 TODO
 
 ## Packages
 
@@ -134,50 +78,9 @@ Configuration package containing ABIs, contract addresses, and type definitions.
 
 [View Package Documentation](./config)
 
-### @mistcash/crypto
-
-#### https://www.npmjs.com/package/@mistcash/crypto
-
-Cryptographic operations for transaction privacy and security.
-
-**Key Features:**
-
-- Transaction secret generation (`txSecret`)
-- Transaction hash computation (`txHash`)
-- Merkle tree operations for privacy
-
-[View Package Documentation](./crypto)
-
-## Prerequisites
-
-Before using the MIST SDK, ensure you have:
-
-1. **Starknet React Setup** (for React applications): Follow the [Starknet React getting started guide](https://github.com/apibara/starknet-react/tree/main?tab=readme-ov-file#getting-started)
-2. **A Starknet Provider**: Either through Starknet React or directly via starknet.js
-
-## Key Integration Points
-
-### For Frontend Developers
-
-- Use `@mistcash/react` for easy React integration
-- Handle multi-call transactions (approve + deposit)
-- Generate and share claiming keys securely
-- Provide clear UX for transaction status
-
-### For Backend Developers
-
-- Use `@mistcash/sdk` for contract interactions
-- Implement transaction verification endpoints
-- Handle both direct reads and fallback methods
-- Cache results to avoid repeated contract calls
-
 ### Important Notes
 
-⚠️ **Spent Transactions**: The contract cannot detect if a transaction has been claimed. Always check transaction age and implement your own tracking if needed.
-
-⚠️ **Network Delays**: Transaction verification may take time after submission due to block confirmation delays.
-
-⚠️ **Key Security**: Claiming keys should be transmitted securely and only to intended recipients.
+#### 📝 TODO
 
 ## Examples
 
