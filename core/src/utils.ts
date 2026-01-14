@@ -61,7 +61,7 @@ export async function fetchTxAssets(
   valKey: string,
   valTo: string,
 ): Promise<Asset> {
-  const asset = await contract.read_tx(await txSecret(valKey, valTo));
+  const asset = await contract.assets_from_secret(BigInt(txSecret(valKey, valTo)));
   let amount = asset.amount;
   if (typeof amount == 'number') {
     amount = BigInt(amount);
