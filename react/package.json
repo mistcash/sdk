@@ -27,7 +27,6 @@
   "dependencies": {
     "@aztec/bb.js": "0.87.4-starknet.1",
     "@mistcash/config": "workspace:*",
-    "@mistcash/crypto": "workspace:*",
     "@mistcash/sdk": "workspace:*",
     "@noir-lang/noir_js": "1.0.0-beta.5",
     "@starknet-react/chains": "^5.0.3",
