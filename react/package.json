@@ -1,6 +1,6 @@
 {
   "name": "@mistcash/react",
-  "version": "0.2.2",
+  "version": "0.5.1",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -25,15 +25,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@aztec/bb.js": "0.87.4-starknet.1",
     "@mistcash/config": "workspace:*",
-    "@mistcash/crypto": "workspace:*",
     "@mistcash/sdk": "workspace:*",
-    "@noir-lang/noir_js": "1.0.0-beta.5",
     "@starknet-react/chains": "^5.0.3",
     "@starknet-react/core": "^5.0.3",
-    "garaga": "^0.18.2",
-    "starknet": "^8.9.0"
+    "garaga": "^1.0.1",
+    "starknet": "^9.2.1"
   },
   "peerDependencies": {
     "react": "^19.1.0"

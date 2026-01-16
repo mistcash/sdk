@@ -1,0 +1,90 @@
+import { hash2Sync } from './gnark';
+
+export type HasherFn = (left: bigint, right: bigint) => bigint;
+export type LeafFilterFn = (eaf: bigint) => bigint;
+
+export function merkleHasher(left: bigint, right: bigint): bigint {
+  if (right < left) {
+    const temp = left;
+    left = right;
+    right = temp;
+  }
+
+  return left == 0n ? right : BigInt(hash2Sync(left.toString(), right.toString()));
+}
+
+export function evenLeafFilter(leaf: bigint): bigint {
+  return leaf % 2n == 1n ? leaf - 1n : leaf;
+}
+
+// write merkle root calculator
+export function calculateMerkleRoot(
+  leaves: bigint[],
+  hasher: HasherFn = merkleHasher, // Default hasher, gnark hash2
+  leafFilter: LeafFilterFn = a => a, // No filetering by default
+): bigint {
+  let tree = leaves.map(leafFilter);
+  while (tree.length > 1) {
+    if (tree.length % 2 != 0) {
+      tree.push(0n);
+    }
+    tree = get_next_level(tree, hasher);
+  }
+
+  return tree[0];
+}
+
+export function merkleRootFromPath(
+  element: bigint,
+  path: bigint[],
+  hasher: HasherFn = merkleHasher,
+  leafFilter: LeafFilterFn = a => a,
+): bigint {
+  let el = leafFilter(element);
+  for (let i = 0; i < path.length; i++) {
+    el = hasher(el, path[i]);
+  }
+  return el;
+}
+
+// write merkle root calculator
+export function calculateMerkleRootAndProof(
+  leaves: bigint[],
+  index: number,
+  hasher: HasherFn = merkleHasher,
+  leafFilter: LeafFilterFn = a => a,
+): bigint[] {
+  let tree = leaves.map(leafFilter);
+  const proof: bigint[] = [];
+
+  while (tree.length > 1) {
+    if (tree.length % 2 != 0) {
+      tree.push(0n);
+    }
+
+    if (index % 2 == 0) {
+      proof.push(tree[index + 1]);
+    } else {
+      proof.push(tree[index - 1]);
+    }
+
+    index = Math.floor(index / 2);
+
+    tree = get_next_level(tree, hasher);
+  }
+
+  proof.push(tree[0]);
+
+  return proof;
+}
+
+export function get_next_level(tree: bigint[], hasher: HasherFn = merkleHasher): bigint[] {
+  const newLevel: bigint[] = [];
+  for (let i = 0; i < tree.length; i += 2) {
+    let left = tree[i];
+    let right = tree[i + 1];
+    const combined = hasher(left, right);
+    newLevel.push(combined);
+  }
+  return newLevel;
+}

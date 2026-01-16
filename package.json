@@ -1,6 +1,6 @@
 {
   "name": "@mistcash/sdk-workspace",
-  "version": "0.2.2",
+  "version": "0.5.1",
   "private": true,
   "workspaces": [
     "core",
@@ -9,19 +9,22 @@
     "react"
   ],
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm embed;pnpm -r build",
     "dev": "pnpm -r dev",
     "test": "pnpm -r test",
     "test:watch": "pnpm -r test:watch",
-    "clean": "pnpm -r clean"
+    "clean": "pnpm -r clean",
+    "embed": "bash scripts/gnark-embeddings.sh",
+    "format": "prettier --write \"**/*.{js,ts,tsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{js,ts,tsx,json,md,yml,yaml}\""
   },
   "devDependencies": {
     "@testing-library/react": "^16.0.0",
-    "@types/jest": "^29.5.0",
-    "jest": "^29.5.0",
     "jest-environment-jsdom": "^29.5.0",
     "ts-jest": "^29.1.2",
-    "typescript": "^5.0.0"
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0",
+    "typescript": "^5.9.3"
   },
   "repository": {
     "type": "git",
@@ -31,5 +34,15 @@
   "bugs": {
     "url": "https://github.com/mistcash/sdk/issues"
   },
-  "homepage": "https://github.com/mistcash/sdk#readme"
+  "homepage": "https://github.com/mistcash/sdk#readme",
+  "pnpm": {
+    "overrides": {
+      "glob@>=10.2.0 <10.5.0": ">=10.5.0",
+      "next@>=15.5.1-canary.0 <15.5.8": ">=15.5.8",
+      "react-router@>=7.0.0 <=7.11.0": ">=7.12.0",
+      "react-router@>=7.0.0 <7.12.0": ">=7.12.0",
+      "react-router@>=7.0.0 <7.9.6": ">=7.9.6",
+      "react-router@>=7.0.0 <=7.8.2": ">=7.9.0"
+    }
+  }
 }

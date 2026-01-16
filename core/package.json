@@ -1,6 +1,6 @@
 {
   "name": "@mistcash/sdk",
-  "version": "0.2.2",
+  "version": "0.5.1",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -13,7 +13,7 @@
     "url": "https://github.com/mistcash/sdk/issues"
   },
   "homepage": "https://github.com/mistcash/sdk#readme",
-  "description": "MIST Core SDK",
+  "description": "MIST Core SDK with Go WASM support",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -26,13 +26,18 @@
   },
   "dependencies": {
     "@mistcash/config": "workspace:*",
-    "@mistcash/crypto": "workspace:*",
-    "starknet": "^8.9.0"
+    "garaga": "^1.0.1",
+    "starknet": "^9.2.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
-    "jest": "^29.5.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0"
-  }
+    "@types/node": "^20.19.29",
+    "jest": "^29.7.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  },
+  "files": [
+    "dist",
+    "wasm"
+  ]
 }
