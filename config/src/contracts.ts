@@ -1,7 +1,7 @@
 import { Abi, TypedContractV2 } from 'starknet';
 
 export const CHAMBER_ADDR_MAINNET = (process.env.CHAMBER_ADDR_MAINNET ||
-  '0x03a889eb7aecedcb76b987fc981ad3b92689cf45bffec8c1c409a4b0b79c3f31') as `0x${string}`;
+  '0x06f8dcc500131b6be6b33f4534ec6d33df33e61083ec2b051555d52e75654444') as `0x${string}`;
 
 export const CHAMBER_ABI = [
   {
@@ -133,7 +133,7 @@ export const CHAMBER_ABI = [
             "type": "core::integer::u256"
           },
           {
-            "name": "recipient",
+            "name": "owner",
             "type": "core::starknet::contract_address::ContractAddress"
           },
           {
@@ -157,7 +157,7 @@ export const CHAMBER_ABI = [
             "type": "core::integer::u256"
           },
           {
-            "name": "recipient",
+            "name": "owner",
             "type": "core::starknet::contract_address::ContractAddress"
           },
           {
