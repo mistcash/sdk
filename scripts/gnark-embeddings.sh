@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-GO_DIST_DIR="$PROJECT_ROOT/go-dist"
+GO_DIST_DIR="$PROJECT_ROOT/gnark-dist"
 TARGET_DIR="$PROJECT_ROOT/core/src/gnark"
 
 echo "🔧 Embedding WASM files as base64 in TypeScript..."

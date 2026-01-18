@@ -168,7 +168,7 @@ Or let the SDK load it dynamically (it will look for `/wasm_exec.js`).
 
 ### Node.js
 
-The SDK will automatically load `wasm_exec_node.js` from the `go-dist` directory.
+The SDK will automatically load `wasm_exec_node.js` from the `gnark-dist` directory.
 
 ### Webpack/Vite
 
