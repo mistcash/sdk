@@ -104,17 +104,6 @@ export function useMist(
       BigInt(asset.addr).toString(),
       BigInt(asset.amount).toString(),
     );
-    const nullifier = txHash(
-      (BigInt(valKey) + 1n).toString(),
-      valTo,
-      BigInt(asset.addr).toString(),
-      BigInt(asset.amount).toString(),
-    );
-    const tx1 = hash_with_asset(
-      new_tx_secret,
-      BigInt(asset.addr).toString(),
-      newTxAmt.toString(),
-    );
     const tx_index = txLeaves.indexOf(tx_hash);
     const merkleProofWRoot = calculateMerkleRootAndProof(txLeaves, tx_index);
     const merkleProof = merkleProofWRoot
@@ -136,12 +125,7 @@ export function useMist(
         Amount: withdrawAmount.toString(),
         Addr: withdrawAmount == 0n ? '0' : asset.addr,
       },
-      Nullifier: nullifier.toString(),
       Tx1Secret: new_tx_secret.toString(),
-      Tx1: newTxAmt == 0n ? '0' : tx1,
-      Tx2Amount: '0',
-      Tx2Secret: '0',
-      Tx2: '0',
     };
 
     console.log('Witness prepared:', witness);
@@ -154,7 +138,6 @@ export function useMist(
         throw 'contract not set up!';
       }
     } catch (error) {
-      console.log(`Proof witness: ${JSON.stringify(witness, null, 2)}`);
       console.error('Failed to process withdraw:', error);
     }
   }

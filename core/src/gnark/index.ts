@@ -4,6 +4,7 @@ import './wasm_exec.js';
 import WITNESS_JSON from './assignment.json';
 import VK_JSON from './vk.json';
 import PROOF_JSON from './proof.json';
+import { generateClaimingKey, hash_with_asset, txHash } from '../utils';
 export * from './types';
 
 const FIXTURES: {
@@ -15,7 +16,25 @@ const FIXTURES: {
 };
 export { FIXTURES };
 
-export type Witness = typeof WITNESS_JSON;
+export type WitnessStrict = typeof WITNESS_JSON;
+export type Witness = Omit<WitnessStrict, 'Nullifier' | 'OwnerKey' | 'AuthDone' | 'WithdrawTo' | 'Tx1Secret' | 'Tx1' | 'Tx1Amount' | 'Tx2Secret' | 'Tx2' | 'Payload'> & {
+  // these can be computed from other inputs
+
+  OwnerKey?: string;
+  AuthDone?: string;
+  WithdrawTo?: string;
+
+  Nullifier?: string;
+
+  Tx1Amount?: string;
+  Tx1Secret?: string;
+  Tx1?: string;
+
+  Tx2Secret?: string;
+  Tx2?: string;
+
+  Payload?: string;
+};
 
 // Shared state management
 let wasmInstance: WasmInstance | null = null;
@@ -89,6 +108,55 @@ export async function initWasm(): Promise<WasmExports> {
  */
 export async function prove_groth16(witness: Witness): Promise<ProofResponse> {
   let { prove } = await initWasm();
+
+  witness.Tx1Amount = witness.Tx1Amount || '0';
+
+  witness.Nullifier = txHash(
+    (BigInt(witness.ClaimingKey) + 1n).toString(),
+    witness.Owner,
+    witness.TxAsset.Addr,
+    witness.TxAsset.Amount,
+  ).toString();
+
+  if (!witness.Tx1Secret) {
+    if (BigInt(witness.Tx1Amount) > 0n) {
+      throw new Error('Tx1Secret must be provided when Tx1 amount is greater than zero');
+    }
+    // random secret if not set
+    witness.Tx1Secret = hash2Sync(generateClaimingKey(), Date.now().toString());
+  }
+
+  witness.Tx1 = hash_with_asset(
+    BigInt(witness.Tx1Secret).toString(),
+    witness.TxAsset.Addr,
+    witness.Tx1Amount,
+  )
+
+  const tx2Amt = BigInt(witness.TxAsset.Amount) - BigInt(witness.Tx1Amount) - BigInt(witness.Withdraw.Amount);
+
+  if (!witness.Tx2Secret) {
+    if (tx2Amt > 0n) {
+      throw new Error('Tx2Secret must be provided when Tx2 amount is greater than zero');
+    }
+    // random secret if not set
+    witness.Tx2Secret = hash2Sync(generateClaimingKey(), Date.now().toString());
+  }
+
+  witness.Tx2 = hash_with_asset(
+    BigInt(witness.Tx2Secret).toString(),
+    witness.TxAsset.Addr,
+    tx2Amt.toString(),
+  )
+
+
+  witness = {
+    OwnerKey: '0',
+    AuthDone: '0',
+    WithdrawTo: witness.Owner,
+    Payload: '0',
+    ...witness,
+  };
+
   return await prove(JSON.stringify(witness));
 }
 
