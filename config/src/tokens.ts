@@ -52,8 +52,10 @@ export const tokensData: Token[] = [
 ];
 
 export const tokensMap: { [key: string]: Token } = {};
+export const tokenNamesMap: { [key: string]: Token } = {};
 
 tokensData.forEach((token, i) => {
   tokensData[i].id = '0x' + BigInt(token.id).toString(16);
   tokensMap['0x' + BigInt(token.id).toString(16)] = token;
+  tokenNamesMap[token.name] = token;
 });

@@ -156,3 +156,10 @@ export function fmtAmtToBigInt(amountStr: string, decimals: number): bigint {
   }
   return amt;
 }
+
+export function getHashParams(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const hash = window.location.hash.slice(1); // Remove the '#'
+  const params = new URLSearchParams(hash);
+  return Object.fromEntries(params.entries());
+};
