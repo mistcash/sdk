@@ -344,7 +344,7 @@ const findItemFromKeyPatterns = (data: { [key: string]: any }, keyPatterns: stri
 		});
 	});
 
-	if (typeof bestMatch !== 'undefined' && bestMatch !== null) {
+	if (bestMatch !== null) {
 		return bestMatch;
 	}
 	throw new KeyPatternNotFoundError(`No key found with patterns ${keyPatterns}`);
