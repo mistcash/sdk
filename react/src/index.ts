@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { UseProviderResult, UseSendTransactionResult } from '@starknet-react/core';
-import { CHAMBER_ADDR_MAINNET, ChamberTypedContract, } from '@mistcash/config';
-import { full_prove, hash_with_asset, Witness } from '@mistcash/sdk';
+import { CHAMBER_ADDR_MAINNET, ChamberTypedContract, tokenNamesMap, tokensMap } from '@mistcash/config';
+import { full_prove, getHashParams, Witness } from '@mistcash/sdk';
 import { calculateMerkleRootAndProof, txHash, txSecret } from '@mistcash/sdk';
 import { devStr, devVal, Asset, fetchTxAssets, getChamber, initCore } from '@mistcash/sdk';
 import { Call, ProviderInterface } from 'starknet';
@@ -57,23 +57,33 @@ export function useMist(
   );
   const setLoadingMsg = (status: LoadingStatus) => _setLoadingMsg(loadingStatuses[status]);
 
+  const hashParams = getHashParams();
+
   const [valTo, setTo] = useState<string>(
-    devStr('0x021233997111a61e323Bb6948c42441a2b1a25cc0AB29BB0B719c483f7C9f469'),
+    hashParams.to || devStr('0x021233997111a61e323Bb6948c42441a2b1a25cc0AB29BB0B719c483f7C9f469'),
   );
-  const [valKey, setKey] = useState<string>(devStr('0xdada'));
+  const [valKey, setKey] = useState<string>(
+    hashParams.key || devStr('0xdada')
+  );
+  hashParams.addr = hashParams.tkn ? tokenNamesMap[hashParams.tkn]?.id : hashParams.addr;
   const [asset, setAsset] = useState<Asset | undefined>(
-    devVal({
-      amount: BigInt('1000000000000'),
-      addr: '0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7',
-    }),
+    hashParams.addr || hashParams.amount
+      ? {
+        amount: hashParams.amount ? BigInt(hashParams.amount) : 0n,
+        addr: hashParams.tkn ? hashParams.tkn || '',
+      }
+      : devVal({
+        amount: BigInt('1000000000000'),
+        addr: '0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7',
+      }),
   );
   const setAssetAddr = (addr: string) => setAsset({ amount: asset?.amount || 0n, addr });
   const setAssetAmt = (amount: bigint) => setAsset({ amount, addr: asset?.addr || '' });
 
   // Seek and hide second transaction params
-  const [valSnHTo, setSnHTo] = useState<string>('');
-  const [valSnHKey, setSnHKey] = useState<string>('');
-  const [valSnHAmt, setSnHAmt] = useState<string>('');
+  const [valSnHTo, setSnHTo] = useState<string>(hashParams.snHTo || '');
+  const [valSnHKey, setSnHKey] = useState<string>(hashParams.snHKey || '');
+  const [valSnHAmt, setSnHAmt] = useState<string>(hashParams.snHAmt || '');
 
   const contract = useMemo(() => {
     return getChamber(actualProvider);
