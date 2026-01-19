@@ -65,12 +65,13 @@ export function useMist(
   const [valKey, setKey] = useState<string>(
     hashParams.key || devStr('0xdada')
   );
+
   hashParams.addr = hashParams.tkn ? tokenNamesMap[hashParams.tkn]?.id : hashParams.addr;
   const [asset, setAsset] = useState<Asset | undefined>(
     hashParams.addr || hashParams.amount
       ? {
         amount: hashParams.amount ? BigInt(hashParams.amount) : 0n,
-        addr: hashParams.tkn ? hashParams.tkn || '',
+        addr: hashParams.addr || '',
       }
       : devVal({
         amount: BigInt('1000000000000'),
@@ -137,8 +138,6 @@ export function useMist(
       },
       Tx1Secret: new_tx_secret.toString(),
     };
-
-    console.log('Witness prepared:', witness);
 
     try {
       const calldata = (await full_prove(witness)).slice(1);
