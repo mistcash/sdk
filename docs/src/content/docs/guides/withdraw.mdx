@@ -1,0 +1,179 @@
+---
+title: Withdrawing Tokens
+description: Step-by-step guide to withdrawing tokens from the MIST.cash privacy pool using zero-knowledge proofs.
+---
+
+import { Steps, Aside } from "@astrojs/starlight/components";
+
+This guide covers the complete withdrawal flow — from looking up a transaction to generating a zero-knowledge proof and claiming tokens.
+
+## Overview
+
+Withdrawal proves you know a valid commitment in the Merkle tree **without revealing which one**. The proof is generated client-side using Groth16 (via WASM) and verified on-chain.
+
+## Prerequisites
+
+You need:
+- A **claiming key** (received from the depositor)
+- Your **Starknet address** (the recipient specified during deposit)
+- A **Starknet wallet** to sign the withdrawal transaction
+
+```typescript
+import {
+  initCore,
+  txSecret,
+  txHash,
+  fetchTxAssets,
+  getTxIndexInTree,
+  calculateMerkleRootAndProof,
+  full_prove,
+  getChamber,
+} from "@mistcash/sdk";
+
+await initCore();
+```
+
+## Withdrawal Flow
+
+<Steps>
+  1. **Look up the transaction**
+
+     First, verify the deposit exists and get its asset details:
+
+     ```typescript
+     const chamber = getChamber(provider);
+     const asset = await fetchTxAssets(chamber, claimingKey, myAddress);
+
+     console.log("Token:", asset.addr);
+     console.log("Amount:", asset.amount.toString());
+     ```
+
+     <Aside type="caution">
+       `fetchTxAssets` confirms a transaction existed but cannot determine if it has already been spent. The contract tracks spent status via nullifiers, which are checked during proof verification.
+     </Aside>
+
+  2. **Get the Merkle tree state**
+
+     Fetch all transaction leaves and find the index of your transaction:
+
+     ```typescript
+     const leaves = await chamber.tx_array();
+
+     const txIndex = await getTxIndexInTree(
+       leaves,
+       claimingKey,
+       myAddress,
+       asset.addr,
+       asset.amount.toString()
+     );
+     ```
+
+  3. **Compute the Merkle proof**
+
+     ```typescript
+     const [root, ...proof] = calculateMerkleRootAndProof(leaves, txIndex);
+     ```
+
+  4. **Build the witness**
+
+     The witness contains everything the ZK circuit needs to generate a proof:
+
+     ```typescript
+     const witness = {
+       ClaimingKey: claimingKey,
+       Owner: myAddress,
+       TxAsset: asset.addr,
+       Withdraw: {
+         Amount: asset.amount.toString(),
+       },
+       MerkleRoot: root.toString(),
+       MerkleProof: proof.map(String),
+       Tx1Secret: txSecret(claimingKey, myAddress),
+     };
+     ```
+
+  5. **Generate the proof and submit**
+
+     ```typescript
+     const calldata = await full_prove(witness);
+     await chamber.connect(account).handle_zkp(calldata);
+     ```
+
+     This generates a Groth16 proof in WASM and formats it as Starknet calldata using Garaga.
+</Steps>
+
+## Complete Example
+
+```typescript
+async function withdraw(account, provider, claimingKey, myAddress) {
+  await initCore();
+
+  const chamber = getChamber(provider);
+
+  // 1. Look up transaction
+  const asset = await fetchTxAssets(chamber, claimingKey, myAddress);
+
+  // 2. Get tree state
+  const leaves = await chamber.tx_array();
+  const txIndex = await getTxIndexInTree(
+    leaves, claimingKey, myAddress, asset.addr, asset.amount.toString()
+  );
+
+  // 3. Compute Merkle proof
+  const [root, ...proof] = calculateMerkleRootAndProof(leaves, txIndex);
+
+  // 4. Build witness
+  const witness = {
+    ClaimingKey: claimingKey,
+    Owner: myAddress,
+    TxAsset: asset.addr,
+    Withdraw: { Amount: asset.amount.toString() },
+    MerkleRoot: root.toString(),
+    MerkleProof: proof.map(String),
+    Tx1Secret: txSecret(claimingKey, myAddress),
+  };
+
+  // 5. Generate proof and withdraw
+  const calldata = await full_prove(witness);
+  await chamber.connect(account).handle_zkp(calldata);
+}
+```
+
+## Using the React Hook
+
+The `useMist` hook handles this entire flow automatically:
+
+```tsx
+import { useMist } from "@mistcash/react";
+
+function WithdrawUI({ provider, sendTx }) {
+  const mist = useMist(provider, sendTx);
+
+  const handleWithdraw = async () => {
+    const asset = await mist.fetchAsset();
+    await mist.handleWithdraw(asset);
+  };
+
+  return (
+    <div>
+      <input
+        placeholder="Claiming Key"
+        value={mist.valKey}
+        onChange={(e) => mist.setKey(e.target.value)}
+      />
+      <input
+        placeholder="Your Address"
+        value={mist.valTo}
+        onChange={(e) => mist.setTo(e.target.value)}
+      />
+      <button onClick={handleWithdraw} disabled={mist.isPending}>
+        {mist.isPending ? "Generating proof..." : "Withdraw"}
+      </button>
+    </div>
+  );
+}
+```
+
+<Aside type="tip">
+  The React hook manages all intermediate state (loading, tree fetching, proof generation) and provides `isPending` and `loadingMessage` for UI feedback.
+</Aside>

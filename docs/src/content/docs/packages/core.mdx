@@ -1,0 +1,295 @@
+---
+title: "@mistcash/sdk"
+description: Core cryptographic engine for privacy transactions on Starknet.
+---
+
+import { Tabs, TabItem, Aside, Steps } from "@astrojs/starlight/components";
+
+The core package provides all cryptographic primitives needed for private transactions: Poseidon hashing via Go WASM, Groth16 zero-knowledge proof generation, Merkle tree operations, and Chamber contract interaction utilities.
+
+## Installation
+
+<Tabs>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @mistcash/sdk @mistcash/config
+    ```
+  </TabItem>
+  <TabItem label="npm">
+    ```bash
+    npm install @mistcash/sdk @mistcash/config
+    ```
+  </TabItem>
+</Tabs>
+
+## Initialization
+
+The SDK relies on a Go-compiled WASM module for cryptographic operations. Initialize before use:
+
+```typescript
+import { initCore } from "@mistcash/sdk";
+
+await initCore();
+```
+
+Or initialize modules independently:
+
+```typescript
+import { initWasm, initGaraga } from "@mistcash/sdk";
+
+await initWasm();   // Hashing + proof generation
+await initGaraga(); // Proof calldata formatting for Starknet
+```
+
+<Aside type="tip">
+  Call `initCore()` once at application startup. It internally calls both `initWasm()` and `initGaraga()`.
+</Aside>
+
+## Hashing
+
+The SDK uses Poseidon hashing — a ZK-friendly hash function. All hash functions are powered by the Go WASM module.
+
+### `hash2(a, b)`
+
+Two-input Poseidon hash. Returns a hex string.
+
+```typescript
+const commitment = await hash2(claimingKey, ownerAddress);
+```
+
+### `hash2Sync(a, b)`
+
+Synchronous version. Use when you know WASM is already initialized.
+
+```typescript
+const commitment = hash2Sync(claimingKey, ownerAddress);
+```
+
+### `hash3(a, b, c)`
+
+Three-input Poseidon hash.
+
+```typescript
+const hash = await hash3(secret, tokenAddress, amount);
+```
+
+### `hash3Sync(a, b, c)`
+
+Synchronous three-input hash.
+
+```typescript
+const hash = hash3Sync(secret, tokenAddress, amount);
+```
+
+### `txSecret(key, to)`
+
+Derives a transaction secret from a claiming key and recipient address.
+
+```typescript
+const secret = txSecret(claimingKey, recipientAddress);
+```
+
+### `hash_with_asset(secret, asset, amount)`
+
+Hashes a transaction secret with asset details to create a commitment leaf.
+
+```typescript
+const leaf = hash_with_asset(secret, tokenAddress, amount);
+```
+
+### `txHash(key, owner, tokenAddr, amount)`
+
+Computes the full transaction hash used as a Merkle leaf. Returns a `bigint`.
+
+```typescript
+const hash = txHash(claimingKey, ownerAddress, tokenAddress, amount);
+// Returns: bigint
+```
+
+### `generateClaimingKey()`
+
+Generates a cryptographically random claiming key.
+
+```typescript
+const key = generateClaimingKey();
+// Returns: "0x..." (hex string)
+```
+
+## Zero-Knowledge Proofs
+
+### `prove_groth16(witness)`
+
+Generates a Groth16 proof from a witness. The proof is computed entirely client-side in WASM.
+
+```typescript
+import { prove_groth16 } from "@mistcash/sdk";
+import type { Witness } from "@mistcash/sdk";
+
+const witness: Witness = {
+  ClaimingKey: claimingKey,
+  Owner: recipientAddress,
+  TxAsset: tokenAddress,
+  Withdraw: {
+    Amount: amount,
+  },
+  MerkleRoot: root.toString(),
+  MerkleProof: proof.map(String),
+  Tx1Secret: txSecret(claimingKey, recipientAddress),
+};
+
+const result = await prove_groth16(witness);
+
+if (result.status === "ok") {
+  console.log("Proof:", result.proof);
+} else {
+  console.error("Proof failed:", result.error);
+}
+```
+
+### `full_prove(witness)`
+
+Generates a proof and formats it as Starknet calldata using Garaga. Returns an array of `bigint` values ready to submit on-chain.
+
+```typescript
+import { full_prove } from "@mistcash/sdk";
+
+const calldata = await full_prove(witness);
+// Returns: bigint[] — ready for contract call
+```
+
+<Aside type="caution">
+  Proof generation is computationally intensive and runs in WASM. It may take several seconds depending on the device.
+</Aside>
+
+### `FIXTURES`
+
+Pre-built test fixtures for development:
+
+```typescript
+import { FIXTURES } from "@mistcash/sdk";
+
+console.log(FIXTURES.witness);      // Example witness
+console.log(FIXTURES.proof);        // Example proof
+console.log(FIXTURES.verifyingKey); // Verification key
+```
+
+## Merkle Trees
+
+The SDK implements a binary Merkle tree using Poseidon hashing.
+
+### `calculateMerkleRoot(leaves, hasher?, leafFilter?)`
+
+Compute the Merkle root from an array of leaves.
+
+```typescript
+import { calculateMerkleRoot } from "@mistcash/sdk";
+
+const leaves = [leaf1, leaf2, leaf3]; // bigint[]
+const root = calculateMerkleRoot(leaves);
+// Returns: bigint
+```
+
+### `calculateMerkleRootAndProof(leaves, index, hasher?, leafFilter?)`
+
+Compute both the Merkle root and the proof path for a specific leaf index.
+
+```typescript
+import { calculateMerkleRootAndProof } from "@mistcash/sdk";
+
+const [root, ...proof] = calculateMerkleRootAndProof(leaves, targetIndex);
+```
+
+### `merkleRootFromPath(element, path, hasher?, leafFilter?)`
+
+Verify a Merkle proof by recomputing the root from an element and its proof path.
+
+```typescript
+import { merkleRootFromPath } from "@mistcash/sdk";
+
+const computedRoot = merkleRootFromPath(leaf, proofPath);
+const isValid = computedRoot === expectedRoot;
+```
+
+### `merkleHasher(left, right)`
+
+The default Poseidon-based hasher used in Merkle tree operations.
+
+```typescript
+import { merkleHasher } from "@mistcash/sdk";
+
+const parentHash = merkleHasher(leftChild, rightChild);
+```
+
+## Contract Utilities
+
+### `getChamber(provider?)`
+
+Returns a typed instance of the Chamber contract.
+
+```typescript
+import { getChamber } from "@mistcash/sdk";
+
+const chamber = getChamber(provider);
+```
+
+### `fetchTxAssets(contract, valKey, valTo)`
+
+Fetches the assets associated with a transaction from the contract.
+
+```typescript
+const asset = await fetchTxAssets(chamber, claimingKey, recipientAddress);
+// Returns: { addr: string, amount: string | bigint }
+```
+
+<Aside type="caution">
+  `fetchTxAssets` confirms a transaction *existed* but cannot determine if it has already been spent. The contract does not track spent status on-chain — that is handled by nullifiers during withdrawal.
+</Aside>
+
+### `checkTxExists(contract, valKey, valTo, tokenAddr, amount)`
+
+Check whether a specific transaction exists in the contract.
+
+```typescript
+const exists = await checkTxExists(chamber, key, to, tokenAddr, amount);
+// Returns: boolean
+```
+
+### `getTxIndexInTree(leaves, valKey, valTo, tokenAddr, amount)`
+
+Find the index of a transaction in the Merkle tree leaves.
+
+```typescript
+const index = await getTxIndexInTree(leaves, key, to, tokenAddr, amount);
+// Returns: number
+```
+
+## Formatting Utilities
+
+### `fmtAmount(amount, decimals)`
+
+Format a `bigint` amount with decimal places for display.
+
+```typescript
+import { fmtAmount } from "@mistcash/sdk";
+
+fmtAmount(1000000n, 6); // "1.0"
+```
+
+### `fmtAmtToBigInt(amountStr, decimals)`
+
+Parse a decimal string into a `bigint` with the given precision.
+
+```typescript
+import { fmtAmtToBigInt } from "@mistcash/sdk";
+
+fmtAmtToBigInt("1.5", 18); // 1500000000000000000n
+```
+
+### `getHashParams()`
+
+Parse URL hash parameters (useful for sharing transaction links).
+
+```typescript
+const params = getHashParams();
+// Returns: Record<string, string>
+```

@@ -1,0 +1,157 @@
+---
+title: Getting Started
+description: Install the MIST.cash SDK and run your first privacy transaction.
+---
+
+import { Tabs, TabItem, Steps, Aside } from "@astrojs/starlight/components";
+
+## Installation
+
+<Tabs>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @mistcash/sdk @mistcash/config
+    ```
+  </TabItem>
+  <TabItem label="npm">
+    ```bash
+    npm install @mistcash/sdk @mistcash/config
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add @mistcash/sdk @mistcash/config
+    ```
+  </TabItem>
+</Tabs>
+
+For React applications, also install the React package:
+
+<Tabs>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @mistcash/react
+    ```
+  </TabItem>
+  <TabItem label="npm">
+    ```bash
+    npm install @mistcash/react
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add @mistcash/react
+    ```
+  </TabItem>
+</Tabs>
+
+## Initialization
+
+The SDK uses a Go-compiled WASM module for cryptographic operations. You must initialize it before calling any hash or proof functions.
+
+```typescript
+import { initCore } from "@mistcash/sdk";
+
+// Initialize WASM + Garaga modules
+await initCore();
+```
+
+<Aside type="caution">
+  `initCore()` must complete before calling any hash or proof function.
+  Calling them before initialization will throw an error.
+</Aside>
+
+You can also initialize modules independently:
+
+```typescript
+import { initWasm, initGaraga } from "@mistcash/sdk";
+
+// Initialize only what you need
+await initWasm(); // Required for hashing and proof generation
+await initGaraga(); // Required for proof calldata formatting
+```
+
+## Quick Example: Hash a Secret
+
+<Steps>
+  1. **Initialize the SDK**
+
+     ```typescript
+     import { initCore, hash2, generateClaimingKey } from "@mistcash/sdk";
+     await initCore();
+     ```
+
+  2. **Generate a claiming key**
+
+     ```typescript
+     const claimingKey = generateClaimingKey();
+     console.log("Claiming key:", claimingKey);
+     ```
+
+  3. **Hash the key with a recipient address**
+
+     ```typescript
+     const recipientAddress = "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7";
+     const commitment = await hash2(claimingKey, recipientAddress);
+     console.log("Commitment:", commitment);
+     ```
+</Steps>
+
+## Quick Example: React Integration
+
+```tsx
+import { useMist } from "@mistcash/react";
+
+function PrivacyWallet({ provider, sendTransaction }) {
+  const mist = useMist(provider, sendTransaction);
+
+  return (
+    <div>
+      <p>Chamber: {mist.chamberAddress}</p>
+      <p>Status: {mist.loadingMessage}</p>
+
+      <input
+        placeholder="Claiming Key"
+        value={mist.valKey}
+        onChange={(e) => mist.setKey(e.target.value)}
+      />
+      <input
+        placeholder="Recipient Address"
+        value={mist.valTo}
+        onChange={(e) => mist.setTo(e.target.value)}
+      />
+
+      <button onClick={() => mist.fetchAsset()}>
+        Find Transaction
+      </button>
+
+      {mist.asset && (
+        <button onClick={() => mist.handleWithdraw(mist.asset!)}>
+          Withdraw
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+## Supported Tokens
+
+The SDK supports the following tokens on Starknet mainnet:
+
+| Token | Symbol | Address |
+|-------|--------|---------|
+| Ether | ETH | `0x049d36...04dc7` |
+| Stark | STRK | `0x04718f...0ecb4` |
+| USD Coin | USDC | `0x053c91...0b2c2` |
+| Tether | USDT | `0x068f5c...36d11` |
+| Survivor | SURVIVOR | `0x5dc92...51f86` |
+
+See [`tokensData`](/packages/config#supported-tokens) in `@mistcash/config` for full addresses and metadata.
+
+## Next Steps
+
+- Learn about the [Core SDK](/packages/core) for low-level cryptographic operations
+- Set up the [React hook](/packages/react) for building UIs
+- Follow the [Deposit guide](/guides/deposit) for a complete deposit flow
+- Follow the [Withdraw guide](/guides/withdraw) for a complete withdrawal flow

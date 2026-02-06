@@ -1,0 +1,130 @@
+---
+title: Depositing Tokens
+description: Step-by-step guide to depositing tokens into the MIST.cash privacy pool.
+---
+
+import { Steps, Aside } from "@astrojs/starlight/components";
+
+This guide walks through the complete process of depositing tokens into the MIST.cash Chamber contract.
+
+## Overview
+
+A deposit creates a cryptographic commitment from a **claiming key** and a **recipient address**, then locks tokens in the Chamber contract. The commitment is added to a Merkle tree — and only someone who knows the claiming key can later withdraw the tokens.
+
+## Prerequisites
+
+```typescript
+import { initCore, generateClaimingKey, txHash } from "@mistcash/sdk";
+import { getChamber } from "@mistcash/sdk";
+import { CHAMBER_ADDR_MAINNET, ERC20_ABI, tokensMap } from "@mistcash/config";
+import { Contract } from "starknet";
+
+await initCore();
+```
+
+## Deposit Flow
+
+<Steps>
+  1. **Generate a claiming key**
+
+     The claiming key is the secret that allows withdrawal. It must be stored securely — anyone with this key can claim the deposited tokens.
+
+     ```typescript
+     const claimingKey = generateClaimingKey();
+
+     // IMPORTANT: Save this key securely!
+     console.log("Save this key:", claimingKey);
+     ```
+
+     <Aside type="danger">
+       If you lose the claiming key, the deposited tokens are **permanently unrecoverable**. There is no recovery mechanism.
+     </Aside>
+
+  2. **Choose the recipient address**
+
+     This is the address that will later withdraw the tokens. It can be any valid Starknet address — including one that doesn't exist yet.
+
+     ```typescript
+     const recipientAddress = "0x049d36..."; // The future withdrawer's address
+     ```
+
+  3. **Compute the commitment hash**
+
+     ```typescript
+     const tokenAddress = tokensMap["ETH"].address;
+     const amount = "1000000000000000000"; // 1 ETH in wei
+
+     const commitment = txHash(claimingKey, recipientAddress, tokenAddress, amount);
+     ```
+
+  4. **Approve the Chamber contract**
+
+     The Chamber needs permission to transfer your tokens:
+
+     ```typescript
+     const token = new Contract(ERC20_ABI, tokenAddress, account);
+     await token.approve(CHAMBER_ADDR_MAINNET, amount);
+     ```
+
+  5. **Execute the deposit**
+
+     ```typescript
+     const chamber = getChamber(provider);
+     const asset = { addr: tokenAddress, amount };
+
+     await chamber.connect(account).deposit(commitment, asset);
+     ```
+
+  6. **Share the claiming key with the recipient**
+
+     The recipient needs:
+     - The **claiming key** (secret)
+     - Their **own address** (they already know this)
+
+     Share the claiming key through a secure channel. Never post it publicly.
+</Steps>
+
+## Complete Example
+
+```typescript
+import { initCore, generateClaimingKey, txHash, getChamber } from "@mistcash/sdk";
+import { CHAMBER_ADDR_MAINNET, ERC20_ABI, tokensMap } from "@mistcash/config";
+import { Contract } from "starknet";
+
+async function deposit(account, provider, recipientAddress, tokenSymbol, amount) {
+  await initCore();
+
+  // 1. Generate secret
+  const claimingKey = generateClaimingKey();
+
+  // 2. Get token info
+  const token = tokensMap[tokenSymbol];
+  if (!token) throw new Error(`Unknown token: ${tokenSymbol}`);
+
+  // 3. Compute commitment
+  const commitment = txHash(claimingKey, recipientAddress, token.address, amount);
+
+  // 4. Approve
+  const erc20 = new Contract(ERC20_ABI, token.address, account);
+  await erc20.approve(CHAMBER_ADDR_MAINNET, amount);
+
+  // 5. Deposit
+  const chamber = getChamber(provider);
+  await chamber.connect(account).deposit(commitment, {
+    addr: token.address,
+    amount,
+  });
+
+  return { claimingKey, commitment };
+}
+```
+
+<Aside type="tip">
+  For React applications, the deposit flow can be simplified using `@starknet-react/core` for wallet management. The `useMist` hook focuses on the withdrawal side — deposits are typically done with direct contract calls.
+</Aside>
+
+## Security Considerations
+
+- **Claiming key storage**: Treat the claiming key like a private key. Store it encrypted or in a secure vault.
+- **Amount privacy**: The deposit amount is visible on-chain. Privacy comes from breaking the link between depositor and withdrawer.
+- **Timing**: Deposits and withdrawals at unusual times with unique amounts can be correlated. Using common amounts (e.g., round numbers) improves privacy.

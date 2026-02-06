@@ -1,0 +1,132 @@
+---
+title: Zero-Knowledge Proofs
+description: Understanding the ZK proof system used in MIST.cash.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+MIST.cash uses **Groth16** zero-knowledge proofs to enable private transactions on Starknet. This guide explains the proof system architecture and how to work with it.
+
+## How ZK Proofs Work in MIST.cash
+
+A zero-knowledge proof allows you to prove a statement is true without revealing any information beyond the statement itself. In MIST.cash, the statement is:
+
+> "I know a valid commitment in the Merkle tree, and I know its secret key."
+
+The proof convinces the contract to release tokens without revealing **which** commitment you're claiming.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Client (Browser)                   │
+│                                                      │
+│  ┌──────────┐    ┌────────────┐    ┌──────────────┐ │
+│  │  Witness  │───▶│  Gnark     │───▶│  Garaga      │ │
+│  │  Builder  │    │  (WASM)    │    │  (Calldata)  │ │
+│  └──────────┘    └────────────┘    └──────────────┘ │
+│                        │                    │        │
+│                   Groth16 Proof      Starknet        │
+│                                     Calldata         │
+└─────────────────────────────────┬───────────────────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────────┐
+                    │   Starknet (On-Chain)    │
+                    │                          │
+                    │  Chamber Contract        │
+                    │  └── Garaga Verifier     │
+                    │      └── Groth16 Check   │
+                    └─────────────────────────┘
+```
+
+### Components
+
+| Component | Role | Technology |
+|-----------|------|------------|
+| **Gnark** | Circuit definition and proof generation | Go, compiled to WASM |
+| **Garaga** | Proof formatting for Starknet verification | TypeScript |
+| **Chamber** | On-chain verification and token release | Cairo (Starknet) |
+
+## The Witness
+
+The witness is the private input to the proof. It contains everything the prover knows but doesn't want to reveal:
+
+```typescript
+interface Witness {
+  ClaimingKey: string;     // The secret key
+  Owner: string;           // Recipient address
+  TxAsset: string;         // Token address
+  Withdraw: {
+    Amount: string;        // Withdrawal amount
+  };
+  MerkleRoot: string;      // Current tree root (public)
+  MerkleProof: string[];   // Path from leaf to root
+  Tx1Secret: string;       // Derived: txSecret(key, owner)
+}
+```
+
+The circuit verifies:
+1. `hash(ClaimingKey, Owner)` produces a valid `TxSecret`
+2. `hash(TxSecret, TxAsset, Amount)` produces a valid leaf
+3. The leaf exists in the Merkle tree (verified via `MerkleProof` against `MerkleRoot`)
+4. The nullifier derived from this proof hasn't been spent
+
+## Generating Proofs
+
+### Low-Level API
+
+Use `prove_groth16` for just the proof, or `full_prove` for proof + Starknet calldata:
+
+```typescript
+import { prove_groth16, full_prove } from "@mistcash/sdk";
+
+// Just the proof
+const result = await prove_groth16(witness);
+if (result.status === "ok") {
+  console.log("Raw proof:", result.proof);
+}
+
+// Proof + formatted calldata for Starknet
+const calldata = await full_prove(witness);
+// calldata is bigint[] ready for chamber.handle_zkp()
+```
+
+### Using FIXTURES for Testing
+
+The SDK includes pre-built fixtures for testing without generating real proofs:
+
+```typescript
+import { FIXTURES } from "@mistcash/sdk";
+
+// Use in tests
+const testWitness = FIXTURES.witness;
+const testProof = FIXTURES.proof;
+```
+
+## Performance
+
+Proof generation runs entirely client-side in the browser via WASM. Performance varies by device:
+
+<Aside>
+  Proof generation is the most computationally intensive operation in the SDK. Always show loading indicators in your UI.
+</Aside>
+
+## Proof Verification
+
+Proofs are verified on-chain by the Garaga verifier integrated into the Chamber contract. The verification checks:
+
+1. The proof is mathematically valid (Groth16 pairing check)
+2. The Merkle root matches the current contract state
+3. The nullifier hasn't been used before
+
+If all checks pass, the contract releases the tokens to the specified recipient.
+
+## Security Properties
+
+| Property | Guarantee |
+|----------|-----------|
+| **Soundness** | Cannot forge a proof without knowing the claiming key |
+| **Zero-knowledge** | The proof reveals nothing about which commitment is being claimed |
+| **Non-malleability** | Proofs cannot be modified or replayed (nullifier prevents double-spend) |
+| **Completeness** | A valid witness always produces a valid proof |

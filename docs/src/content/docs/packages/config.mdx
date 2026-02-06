@@ -1,0 +1,141 @@
+---
+title: "@mistcash/config"
+description: Shared configuration, ABIs, and token definitions for MIST.cash.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The config package provides shared constants, contract ABIs, token metadata, and TypeScript types used across the SDK.
+
+## Installation
+
+```bash
+pnpm add @mistcash/config
+```
+
+## Contract Addresses
+
+### `CHAMBER_ADDR_MAINNET`
+
+The mainnet Chamber contract address on Starknet.
+
+```typescript
+import { CHAMBER_ADDR_MAINNET } from "@mistcash/config";
+
+console.log(CHAMBER_ADDR_MAINNET);
+// "0x06f8dcc500131b6be6b33f4534ec6d33df33e61083ec2b051555d52e75654444"
+```
+
+## ABIs
+
+### `CHAMBER_ABI`
+
+The full ABI for the Chamber smart contract, used to create typed contract instances.
+
+```typescript
+import { CHAMBER_ABI } from "@mistcash/config";
+import { Contract } from "starknet";
+
+const chamber = new Contract(CHAMBER_ABI, CHAMBER_ADDR_MAINNET, provider);
+```
+
+### `ERC20_ABI`
+
+Standard ERC20 ABI for interacting with token contracts.
+
+```typescript
+import { ERC20_ABI } from "@mistcash/config";
+import { Contract } from "starknet";
+
+const token = new Contract(ERC20_ABI, tokenAddress, provider);
+const balance = await token.balance_of(address);
+```
+
+## Supported Tokens
+
+### `tokensData`
+
+Array of all supported tokens with their metadata.
+
+```typescript
+import { tokensData } from "@mistcash/config";
+
+for (const token of tokensData) {
+  console.log(token.name, token.address, token.decimals);
+}
+```
+
+Each token object has the following shape:
+
+```typescript
+interface Token {
+  name: string;      // Human-readable name (e.g., "Ether")
+  symbol: string;    // Symbol (e.g., "ETH")
+  address: string;   // Starknet contract address
+  decimals: number;  // Token decimals (e.g., 18)
+  image?: string;    // Optional icon URL
+}
+```
+
+**Available tokens:**
+
+| Name | Symbol | Decimals |
+|------|--------|----------|
+| Ether | ETH | 18 |
+| Stark | STRK | 18 |
+| USD Coin | USDC | 6 |
+| Tether | USDT | 6 |
+| Survivor | SURVIVOR | 18 |
+
+### `tokensMap`
+
+Lookup tokens by contract address.
+
+```typescript
+import { tokensMap } from "@mistcash/config";
+
+const eth = tokensMap["0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7"];
+console.log(eth.symbol); // "ETH"
+```
+
+### `tokenNamesMap`
+
+Lookup tokens by name.
+
+```typescript
+import { tokenNamesMap } from "@mistcash/config";
+
+const usdc = tokenNamesMap["USDC"];
+console.log(usdc.address);
+```
+
+## Types
+
+### `ChamberTypedContract`
+
+TypeScript type for the typed Chamber contract instance. Use this for type-safe contract interactions.
+
+```typescript
+import type { ChamberTypedContract } from "@mistcash/config";
+
+function doSomething(chamber: ChamberTypedContract) {
+  // Full type safety for all contract methods
+  const root = await chamber.merkle_root();
+}
+```
+
+### `Token`
+
+Interface for token metadata.
+
+```typescript
+import type { Token } from "@mistcash/config";
+
+function renderToken(token: Token) {
+  return `${token.symbol}: ${token.address}`;
+}
+```
+
+<Aside type="tip">
+  All types are exported from the package root. Import them with `import type` for zero runtime cost.
+</Aside>

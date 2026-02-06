@@ -1,0 +1,28 @@
+/* Custom styles for MIST.cash SDK docs */
+
+:root {
+  --sl-color-accent-low: #1a1a2e;
+  --sl-color-accent: #6c63ff;
+  --sl-color-accent-high: #c4c1ff;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #eceef2;
+  --sl-color-gray-2: #c0c2c7;
+  --sl-color-gray-3: #888b96;
+  --sl-color-gray-4: #545861;
+  --sl-color-gray-5: #353841;
+  --sl-color-gray-6: #24272f;
+  --sl-color-black: #17181c;
+  --sl-font-system: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #e8e6ff;
+  --sl-color-accent: #5b52e0;
+  --sl-color-accent-high: #2a2366;
+}
+
+/* Code block styling */
+.expressive-code pre {
+  border-radius: 0.5rem;
+}

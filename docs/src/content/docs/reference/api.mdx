@@ -1,0 +1,168 @@
+---
+title: API Reference
+description: Complete function signatures for all MIST.cash SDK exports.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## @mistcash/sdk
+
+### Initialization
+
+```typescript
+function initCore(): Promise<void>
+function initWasm(): Promise<void>
+function initGaraga(): Promise<void>
+```
+
+### Hashing
+
+```typescript
+function hash2(a: string, b: string): Promise<string>
+function hash2Sync(a: string, b: string): string
+function hash3(a: string, b: string, c: string): Promise<string>
+function hash3Sync(a: string, b: string, c: string): string
+function txSecret(key: string, to: string): string
+function hash_with_asset(secret: string, asset: string, amount: string): string
+function txHash(key: string, owner: string, tokenAddr: string, amount: string): bigint
+function generateClaimingKey(): string
+```
+
+### Zero-Knowledge Proofs
+
+```typescript
+function prove_groth16(witness: Witness): Promise<ProofResponse>
+function full_prove(witness: Witness): Promise<bigint[]>
+
+const FIXTURES: {
+  witness: Witness
+  proof: string
+  verifyingKey: string
+}
+```
+
+### Merkle Trees
+
+```typescript
+function calculateMerkleRoot(
+  leaves: bigint[],
+  hasher?: (a: bigint, b: bigint) => bigint,
+  leafFilter?: (leaf: bigint) => bigint
+): bigint
+
+function calculateMerkleRootAndProof(
+  leaves: bigint[],
+  index: number,
+  hasher?: (a: bigint, b: bigint) => bigint,
+  leafFilter?: (leaf: bigint) => bigint
+): bigint[]
+
+function merkleRootFromPath(
+  element: bigint,
+  path: bigint[],
+  hasher?: (a: bigint, b: bigint) => bigint,
+  leafFilter?: (leaf: bigint) => bigint
+): bigint
+
+function get_next_level(
+  tree: bigint[],
+  hasher?: (a: bigint, b: bigint) => bigint
+): bigint[]
+
+function merkleHasher(left: bigint, right: bigint): bigint
+function evenLeafFilter(leaf: bigint): bigint
+```
+
+### Contract Utilities
+
+```typescript
+function getChamber(provider?: ProviderInterface): ChamberTypedContract
+
+function fetchTxAssets(
+  contract: ChamberTypedContract,
+  valKey: string,
+  valTo: string
+): Promise<Asset>
+
+function checkTxExists(
+  contract: ChamberTypedContract,
+  valKey: string,
+  valTo: string,
+  tokenAddr: string,
+  amount: string
+): Promise<boolean>
+
+function getTxIndexInTree(
+  leaves: bigint[],
+  valKey: string,
+  valTo: string,
+  tokenAddr: string,
+  amount: string
+): Promise<number>
+```
+
+### Formatting
+
+```typescript
+function fmtAmount(amount: bigint, decimals: number): string
+function fmtAmtToBigInt(amountStr: string, decimals: number): bigint
+function getHashParams(): Record<string, string>
+```
+
+### Development
+
+```typescript
+function devVal<T>(val: T, defaultVal?: T): T
+function devStr(val: string): string
+```
+
+---
+
+## @mistcash/config
+
+### Constants
+
+```typescript
+const CHAMBER_ADDR_MAINNET: string
+const CHAMBER_ABI: Abi
+const ERC20_ABI: Abi
+```
+
+### Token Data
+
+```typescript
+const tokensData: Token[]
+const tokensMap: Record<string, Token>
+const tokenNamesMap: Record<string, Token>
+```
+
+### Types
+
+```typescript
+interface Token {
+  name: string
+  symbol: string
+  address: string
+  decimals: number
+  image?: string
+}
+
+type ChamberTypedContract = TypedContractV2<typeof CHAMBER_ABI>
+```
+
+---
+
+## @mistcash/react
+
+### Hook
+
+```typescript
+function useMist(
+  provider: ProviderInterface | undefined,
+  sendTx: (calls: Call[]) => void
+): UseMistResult
+```
+
+<Aside>
+  See the full [`UseMistResult` type](/reference/types#usemistresult) for all returned properties.
+</Aside>

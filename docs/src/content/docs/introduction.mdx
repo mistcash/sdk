@@ -1,0 +1,64 @@
+---
+title: Introduction
+description: Privacy-focused SDK for zero-knowledge transactions on Starknet.
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+MIST.cash SDK is a TypeScript toolkit for building privacy-preserving applications on [Starknet](https://starknet.io). It enables zero-knowledge proof-based private transactions using Groth16 proofs, Poseidon hashing, and Merkle trees.
+
+## Why MIST.cash?
+
+Traditional blockchain transactions are fully transparent — sender, receiver, and amount are all publicly visible. MIST.cash breaks this link using zero-knowledge cryptography, allowing users to deposit, transfer, and withdraw tokens without revealing the connection between sender and receiver.
+
+## Architecture
+
+The SDK is organized as a monorepo with three packages:
+
+<CardGrid>
+  <Card title="@mistcash/sdk" icon="rocket">
+    Core cryptographic engine — WASM-powered Poseidon hashing, Groth16 proof
+    generation, Merkle tree operations, and Chamber contract utilities.
+  </Card>
+  <Card title="@mistcash/config" icon="setting">
+    Shared configuration — contract ABIs, addresses, supported token
+    definitions, and TypeScript types.
+  </Card>
+  <Card title="@mistcash/react" icon="puzzle">
+    React integration — the `useMist` hook for managing deposits, withdrawals,
+    and proof generation from React applications.
+  </Card>
+</CardGrid>
+
+## How It Works
+
+1. **Deposit** — A user deposits tokens into the Chamber contract along with a cryptographic commitment (hash of a secret).
+2. **Privacy** — The deposit is added to a Merkle tree. The link between depositor and the commitment is the only public information.
+3. **Withdraw** — A different address generates a zero-knowledge proof showing knowledge of a valid commitment in the tree, without revealing which one. Tokens are sent to the new address.
+
+The zero-knowledge proof is generated client-side using a Go-compiled WASM module (Gnark) and verified on-chain via the [Garaga](https://garaga.dev) verifier.
+
+## Quick Links
+
+<CardGrid>
+  <LinkCard
+    title="Getting Started"
+    description="Install the SDK and make your first privacy-preserving transaction."
+    href="/getting-started"
+  />
+  <LinkCard
+    title="Core SDK"
+    description="Hashing, proofs, Merkle trees, and contract utilities."
+    href="/packages/core"
+  />
+  <LinkCard
+    title="React Hook"
+    description="Integrate MIST.cash into your React + Starknet app."
+    href="/packages/react"
+  />
+  <LinkCard
+    title="API Reference"
+    description="Complete function signatures and type definitions."
+    href="/reference/api"
+  />
+</CardGrid>

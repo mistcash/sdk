@@ -1,0 +1,125 @@
+---
+title: Merkle Trees
+description: How MIST.cash uses Merkle trees to organize and verify transaction commitments.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+MIST.cash uses a binary Merkle tree with Poseidon hashing to organize all transaction commitments. The Merkle tree enables efficient verification that a commitment exists without revealing which one.
+
+## How It Works
+
+Every deposit creates a **leaf** (commitment hash) that gets added to the tree. The tree structure allows proving membership of any leaf by providing just a logarithmic-sized proof path, rather than revealing all leaves.
+
+```
+             Root
+            /    \
+          H01     H23
+         /   \   /   \
+        H0   H1 H2   H3    ← Leaves (commitments)
+```
+
+To prove leaf `H1` is in the tree, you only need: `[H0, H23]`. The verifier computes `hash(H0, H1) = H01`, then `hash(H01, H23) = Root`, and checks it matches.
+
+## Computing Roots
+
+### From Leaves
+
+```typescript
+import { calculateMerkleRoot } from "@mistcash/sdk";
+
+const leaves = [leaf0, leaf1, leaf2, leaf3]; // bigint[]
+const root = calculateMerkleRoot(leaves);
+```
+
+### With Proof
+
+```typescript
+import { calculateMerkleRootAndProof } from "@mistcash/sdk";
+
+// Get root AND the proof for leaf at index 1
+const [root, ...proof] = calculateMerkleRootAndProof(leaves, 1);
+// proof = [H0, H23] — the sibling hashes needed to reconstruct root from H1
+```
+
+## Verifying Proofs
+
+Given a leaf and its proof path, recompute the root:
+
+```typescript
+import { merkleRootFromPath } from "@mistcash/sdk";
+
+const computedRoot = merkleRootFromPath(leaf, proofPath);
+const isValid = computedRoot === expectedRoot;
+```
+
+## Custom Hashers
+
+By default, the Merkle tree uses `merkleHasher` (Poseidon-based). You can provide a custom hasher:
+
+```typescript
+import { calculateMerkleRoot, merkleHasher } from "@mistcash/sdk";
+
+// Default (Poseidon)
+const root = calculateMerkleRoot(leaves);
+
+// Custom hasher
+const customHasher = (a: bigint, b: bigint): bigint => {
+  // Your custom hash function
+  return a ^ b; // Example only
+};
+const root2 = calculateMerkleRoot(leaves, customHasher);
+```
+
+## Leaf Filtering
+
+The optional `leafFilter` parameter processes each leaf before insertion into the tree:
+
+```typescript
+import { calculateMerkleRoot, evenLeafFilter } from "@mistcash/sdk";
+
+// Apply even leaf filter
+const root = calculateMerkleRoot(leaves, undefined, evenLeafFilter);
+```
+
+## Working with the Contract
+
+The Chamber contract maintains the authoritative Merkle tree. Fetch its state:
+
+```typescript
+import { getChamber } from "@mistcash/sdk";
+
+const chamber = getChamber(provider);
+
+// Get all leaves
+const leaves = await chamber.tx_array();
+
+// Get the on-chain root
+const contractRoot = await chamber.merkle_root();
+
+// Get an on-chain proof for a specific index
+const onChainProof = await chamber.merkle_proof(leafIndex);
+```
+
+### Client-Side vs On-Chain
+
+You can compute roots and proofs client-side or fetch them from the contract:
+
+| Operation | Client-Side | On-Chain |
+|-----------|-------------|----------|
+| Merkle root | `calculateMerkleRoot(leaves)` | `chamber.merkle_root()` |
+| Merkle proof | `calculateMerkleRootAndProof(leaves, index)` | `chamber.merkle_proof(index)` |
+| Verification | `merkleRootFromPath(leaf, proof)` | Done by ZK verifier |
+
+<Aside type="tip">
+  Client-side computation is useful for building the witness before proof generation. The on-chain root is the source of truth for verification.
+</Aside>
+
+## Tree Properties
+
+| Property | Value |
+|----------|-------|
+| Hash function | Poseidon (ZK-friendly) |
+| Tree type | Binary Merkle tree |
+| Leaf format | `hash(txSecret, tokenAddress, amount)` |
+| Proof size | `O(log n)` where `n` is the number of leaves |

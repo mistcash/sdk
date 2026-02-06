@@ -1,0 +1,114 @@
+---
+title: Contract ABI
+description: Chamber smart contract interface and methods.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Chamber contract is the on-chain component of MIST.cash. It manages a Merkle tree of transaction commitments and verifies zero-knowledge proofs for private withdrawals.
+
+## Contract Address
+
+**Starknet Mainnet:**
+
+```
+0x06f8dcc500131b6be6b33f4534ec6d33df33e61083ec2b051555d52e75654444
+```
+
+## Core Methods
+
+### `deposit(hash, asset)`
+
+Deposits tokens into the Chamber and adds a commitment to the Merkle tree.
+
+```typescript
+// The commitment hash
+const hash = txHash(claimingKey, ownerAddress, tokenAddress, amount);
+
+// The asset to deposit
+const asset = { addr: tokenAddress, amount: depositAmount };
+
+await chamber.deposit(hash, asset);
+```
+
+<Aside>
+  Before calling `deposit`, ensure the Chamber contract has approval to transfer the token. Call `approve` on the ERC20 token contract first.
+</Aside>
+
+### `handle_zkp(proof)`
+
+Processes a zero-knowledge proof to execute a private withdrawal. The proof demonstrates knowledge of a valid commitment in the Merkle tree without revealing which one.
+
+```typescript
+const calldata = await full_prove(witness);
+await chamber.handle_zkp(calldata);
+```
+
+### `withdraw_no_zk(claiming_key, owner, asset, proof)`
+
+Withdraws tokens without a zero-knowledge proof. Requires revealing the claiming key.
+
+<Aside type="caution">
+  This method reveals the link between depositor and withdrawer. It exists for testing and emergency recovery only.
+</Aside>
+
+### `seek_and_hide_no_zk(...)`
+
+Transfers tokens within the privacy pool without full ZK. Allows re-hiding tokens under a new commitment.
+
+## Read Methods
+
+### `tx_array()`
+
+Returns all transaction commitment leaves in the Merkle tree.
+
+```typescript
+const leaves = await chamber.tx_array();
+// Returns: bigint[]
+```
+
+### `merkle_root()`
+
+Returns the current Merkle root of the transaction tree.
+
+```typescript
+const root = await chamber.merkle_root();
+// Returns: bigint
+```
+
+### `merkle_proof(index)`
+
+Returns the Merkle proof path for a leaf at the given index.
+
+```typescript
+const proof = await chamber.merkle_proof(leafIndex);
+// Returns: bigint[]
+```
+
+### `assets_from_secret(tx_secret)`
+
+Looks up the asset associated with a transaction secret.
+
+```typescript
+const secret = txSecret(claimingKey, recipientAddress);
+const asset = await chamber.assets_from_secret(secret);
+// Returns: { addr: string, amount: bigint }
+```
+
+### `nullifiers_spent(nullifiers)`
+
+Checks whether a set of nullifiers have been spent (used in withdrawals).
+
+```typescript
+const spent = await chamber.nullifiers_spent([nullifier1, nullifier2]);
+// Returns: boolean[]
+```
+
+### `transactions_exist(transactions)`
+
+Checks whether a set of transaction hashes exist in the tree.
+
+```typescript
+const exists = await chamber.transactions_exist([hash1, hash2]);
+// Returns: boolean[]
+```

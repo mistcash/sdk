@@ -1,0 +1,159 @@
+---
+title: Types
+description: TypeScript type definitions used across the MIST.cash SDK.
+---
+
+## Asset
+
+Represents a token asset with an address and amount.
+
+```typescript
+interface Asset {
+  addr: string;
+  amount: string | bigint;
+}
+```
+
+**Usage:**
+```typescript
+const asset: Asset = {
+  addr: "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7",
+  amount: 1000000000000000000n, // 1 ETH
+};
+```
+
+## Witness
+
+Input to the zero-knowledge proof generator. Contains all data needed to prove knowledge of a valid transaction without revealing which one.
+
+```typescript
+interface Witness {
+  ClaimingKey: string;
+  Owner: string;
+  TxAsset: string;
+  Withdraw: {
+    Amount: string;
+  };
+  MerkleRoot: string;
+  MerkleProof: string[];
+  Tx1Secret: string;
+}
+```
+
+**Fields:**
+
+| Field | Description |
+|-------|-------------|
+| `ClaimingKey` | The secret key that proves ownership of the deposit |
+| `Owner` | The address that will receive the withdrawn tokens |
+| `TxAsset` | The token contract address |
+| `Withdraw.Amount` | The amount to withdraw (as string) |
+| `MerkleRoot` | The current Merkle root of the transaction tree |
+| `MerkleProof` | Array of sibling hashes forming the proof path |
+| `Tx1Secret` | Derived from `txSecret(ClaimingKey, Owner)` |
+
+## ProofResponse
+
+Response from the Groth16 proof generation.
+
+```typescript
+interface ProofResponse {
+  status: "ok" | "error";
+  proof?: string;
+  error?: string;
+  message?: string;
+}
+```
+
+**Success case:**
+```typescript
+{ status: "ok", proof: "..." }
+```
+
+**Error case:**
+```typescript
+{ status: "error", error: "invalid witness", message: "..." }
+```
+
+## Token
+
+Token metadata from `@mistcash/config`.
+
+```typescript
+interface Token {
+  name: string;
+  symbol: string;
+  address: string;
+  decimals: number;
+  image?: string;
+}
+```
+
+## ChamberTypedContract
+
+A typed contract instance for the Chamber smart contract. Provides full TypeScript autocomplete for all contract methods.
+
+```typescript
+type ChamberTypedContract = TypedContractV2<typeof CHAMBER_ABI>;
+```
+
+**Key contract methods:**
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `deposit(hash, asset)` | `void` | Deposit tokens with commitment |
+| `withdraw_no_zk(key, owner, asset, proof)` | `void` | Withdraw without ZK (testing) |
+| `handle_zkp(proof)` | `void` | Process ZK proof withdrawal |
+| `tx_array()` | `bigint[]` | Get all transaction leaves |
+| `merkle_root()` | `bigint` | Get current Merkle root |
+| `merkle_proof(index)` | `bigint[]` | Get proof for leaf index |
+| `assets_from_secret(secret)` | `Asset` | Lookup asset by tx secret |
+| `nullifiers_spent(nullifiers)` | `boolean[]` | Check if nullifiers are spent |
+
+## UseMistResult
+
+Full return type of the `useMist` hook. See the [@mistcash/react documentation](/packages/react#return-value) for a detailed breakdown of each property.
+
+```typescript
+interface UseMistResult {
+  // Contract
+  chamberAddress: string;
+  contract: ChamberTypedContract;
+  txLeaves: bigint[];
+
+  // Loading
+  loadingStatus: "FINDING_TX" | "READY";
+  loadingMessage: string;
+
+  // Inputs
+  valTo: string;
+  setTo: (val: string) => void;
+  valKey: string;
+  setKey: (val: string) => void;
+
+  // Asset
+  asset: Asset | undefined;
+  setAsset: (asset: Asset | undefined) => void;
+  setAssetAddr: (addr: string) => void;
+  setAssetAmt: (amount: bigint) => void;
+
+  // Actions
+  send: (calls?: Call[]) => void;
+  fetchAsset: () => Promise<Asset>;
+  updateTxLeaves: () => Promise<bigint[]>;
+  handleWithdraw: (asset: Asset, newTxAmount?: string) => Promise<void>;
+
+  // Status
+  isPending: boolean;
+  error: string | null;
+  txError: Error | null;
+
+  // Seek and Hide
+  valSnHTo: string;
+  setSnHTo: (val: string) => void;
+  valSnHKey: string;
+  setSnHKey: (val: string) => void;
+  valSnHAmt: string;
+  setSnHAmt: (val: string) => void;
+}
+```

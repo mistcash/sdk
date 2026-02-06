@@ -1,0 +1,205 @@
+---
+title: "@mistcash/react"
+description: React hook for integrating MIST.cash privacy transactions into your app.
+---
+
+import { Tabs, TabItem, Aside, Steps } from "@astrojs/starlight/components";
+
+The React package provides the `useMist` hook — a single hook that manages the full lifecycle of privacy transactions including key input, asset fetching, proof generation, and withdrawal.
+
+## Installation
+
+<Tabs>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @mistcash/react @mistcash/sdk @mistcash/config
+    ```
+  </TabItem>
+  <TabItem label="npm">
+    ```bash
+    npm install @mistcash/react @mistcash/sdk @mistcash/config
+    ```
+  </TabItem>
+</Tabs>
+
+**Peer dependencies:** `react@^19.1.0`
+
+The React package also depends on `@starknet-react/core` and `@starknet-react/chains` for Starknet wallet integration.
+
+## `useMist` Hook
+
+### Signature
+
+```typescript
+function useMist(
+  provider: ProviderInterface | undefined,
+  sendTx: (calls: Call[]) => void
+): UseMistResult;
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `provider` | `ProviderInterface \| undefined` | Starknet provider instance from your wallet connection |
+| `sendTx` | `(calls: Call[]) => void` | Function to send transactions (from `@starknet-react/core`) |
+
+### Return Value
+
+The hook returns an object with the following properties:
+
+#### Contract State
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `chamberAddress` | `string` | The Chamber contract address |
+| `contract` | `ChamberTypedContract` | Typed contract instance |
+| `txLeaves` | `bigint[]` | Current Merkle tree leaves |
+
+#### Loading State
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `loadingStatus` | `"FINDING_TX" \| "READY"` | Current loading state |
+| `loadingMessage` | `string` | Human-readable loading message |
+
+#### Transaction Inputs
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `valKey` | `string` | Current claiming key input |
+| `setKey` | `(val: string) => void` | Set the claiming key |
+| `valTo` | `string` | Current recipient address input |
+| `setTo` | `(val: string) => void` | Set the recipient address |
+
+#### Asset State
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `asset` | `Asset \| undefined` | Found asset details |
+| `setAsset` | `(asset: Asset \| undefined) => void` | Set asset manually |
+| `setAssetAddr` | `(addr: string) => void` | Set asset token address |
+| `setAssetAmt` | `(amount: bigint) => void` | Set asset amount |
+
+#### Actions
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `send` | `(calls?: Call[]) => void` | Send a transaction |
+| `fetchAsset` | `() => Promise<Asset>` | Fetch asset for current key/to |
+| `updateTxLeaves` | `() => Promise<bigint[]>` | Refresh Merkle tree leaves |
+| `handleWithdraw` | `(asset: Asset, newTxAmount?: string) => Promise<void>` | Execute withdrawal with ZK proof |
+
+#### Transaction Status
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `isPending` | `boolean` | Transaction in progress |
+| `error` | `string \| null` | Error message |
+| `txError` | `Error \| null` | Transaction error object |
+
+#### Seek and Hide (Re-hiding)
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `valSnHTo` | `string` | Seek-and-hide recipient |
+| `setSnHTo` | `(val: string) => void` | Set seek-and-hide recipient |
+| `valSnHKey` | `string` | Seek-and-hide key |
+| `setSnHKey` | `(val: string) => void` | Set seek-and-hide key |
+| `valSnHAmt` | `string` | Seek-and-hide amount |
+| `setSnHAmt` | `(val: string) => void` | Set seek-and-hide amount |
+
+## Usage Example
+
+<Steps>
+  1. **Set up your Starknet provider**
+
+     ```tsx
+     import { useAccount, useProvider } from "@starknet-react/core";
+
+     function App() {
+       const { provider } = useProvider();
+       const { account } = useAccount();
+
+       const sendTx = (calls) => {
+         account?.execute(calls);
+       };
+
+       return <PrivacyWallet provider={provider} sendTx={sendTx} />;
+     }
+     ```
+
+  2. **Use the `useMist` hook**
+
+     ```tsx
+     import { useMist } from "@mistcash/react";
+
+     function PrivacyWallet({ provider, sendTx }) {
+       const mist = useMist(provider, sendTx);
+
+       return (
+         <div>
+           <h2>MIST.cash Privacy Wallet</h2>
+           <p>Status: {mist.loadingMessage}</p>
+
+           <label>
+             Claiming Key
+             <input
+               value={mist.valKey}
+               onChange={(e) => mist.setKey(e.target.value)}
+             />
+           </label>
+
+           <label>
+             Recipient Address
+             <input
+               value={mist.valTo}
+               onChange={(e) => mist.setTo(e.target.value)}
+             />
+           </label>
+
+           <button
+             onClick={() => mist.fetchAsset()}
+             disabled={!mist.valKey || !mist.valTo}
+           >
+             Find Transaction
+           </button>
+
+           {mist.asset && (
+             <div>
+               <p>Found: {mist.asset.amount.toString()} of {mist.asset.addr}</p>
+               <button
+                 onClick={() => mist.handleWithdraw(mist.asset!)}
+                 disabled={mist.isPending}
+               >
+                 {mist.isPending ? "Generating proof..." : "Withdraw"}
+               </button>
+             </div>
+           )}
+
+           {mist.error && <p style={{ color: "red" }}>{mist.error}</p>}
+         </div>
+       );
+     }
+     ```
+</Steps>
+
+## Withdrawal Flow
+
+When `handleWithdraw` is called, the hook performs the following steps internally:
+
+1. Fetches the current Merkle tree leaves from the contract
+2. Finds the transaction index in the tree
+3. Computes the Merkle root and proof path
+4. Constructs the witness object
+5. Generates a Groth16 zero-knowledge proof (WASM)
+6. Formats the proof as Starknet calldata (Garaga)
+7. Submits the withdrawal transaction via `sendTx`
+
+<Aside type="tip">
+  The `handleWithdraw` function handles the entire proof generation pipeline. You don't need to interact with `@mistcash/sdk` directly for standard withdrawals.
+</Aside>
+
+<Aside type="caution">
+  Proof generation runs in-browser via WASM and may take several seconds. Use `isPending` to show loading state in your UI.
+</Aside>
