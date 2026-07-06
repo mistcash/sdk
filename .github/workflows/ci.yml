@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm via corepack
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      - name: pnpm install
+        run: pnpm install
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+        # Go is set up for future WASM recompilation.
+        # The current embed script only processes pre-built artifacts in gnark-dist/.
+
+      - name: pnpm run embed
+        run: pnpm run embed
+
+      - name: pnpm -r build
+        run: pnpm -r build
+
+      - name: pnpm test
+        run: pnpm test
+
+      - name: pnpm run format:check
+        run: pnpm run format:check
