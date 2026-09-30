@@ -131,7 +131,7 @@ export class MistClient {
   // ── Spend (send / withdraw) ──────────────────────────────────────────────
 
   /** Unified ZK spend. Sends when `to` is set, withdraws when `withdraw > 0`. */
-  async spend(opts: SpendOpts): Promise<{ receipt: TxReceipt; secs: number }> {
+  async spend(opts: SpendOpts): Promise<{ receipt: TxReceipt; secs: number; commitments: string[] }> {
     const notes = opts.notes ?? this.notes;
     const reserve = opts.reserve ?? this.defaultReserve();
     const amount = opts.amount + (opts.withdraw ?? 0n);
@@ -173,7 +173,7 @@ export class MistClient {
         args: [
           res.proof.map(BigInt) as unknown as readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint],
           res.publicInputs.map(BigInt) as unknown as readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint],
-          (res.ciphertext ?? []).map(BigInt),
+          (res.commitments ?? []).map(BigInt),
         ],
       }),
       'handleZkp',
@@ -184,7 +184,7 @@ export class MistClient {
         this.notes.push({ reserve, id: o.id, blinding: o.Blinding, amount: o.Amount, hash: res.publicInputs[2 + i], kind: i ? 'change' : 'received' });
       }
     });
-    return { receipt, secs };
+    return { receipt, secs, commitments: res.commitments ?? [] };
   }
 
   // ── Membership (X-Wing join) ─────────────────────────────────────────────
