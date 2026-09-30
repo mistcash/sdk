@@ -3,6 +3,8 @@
 // Pure functions with injected hash primitives so the SDK stays
 // transport-agnostic and unit-testable without wasm.
 
+import { keccak256 as viemKeccak256 } from 'viem';
+
 /** "owner" as hex, the keyword MIST owner = H2(secret, keyword) binds to. */
 export const OWNER_KEYWORD = '0x6f776e6572';
 
@@ -40,7 +42,7 @@ export function ownerOf(
 
 /** Fresh field-element blinding: `keccak(random32) >> 8`. */
 export function rand(
-  keccak256: KeccakBytes | ((data: any) => `0x${string}`) = defaultKeccak,
+  keccak256: KeccakBytes | ((data: any) => `0x${string}`) = viemKeccak256 as KeccakBytes,
   randomBytes: (len: number) => Uint8Array = defaultRandom,
 ): string {
   const bytes = randomBytes(32);
@@ -49,13 +51,6 @@ export function rand(
 
 function defaultRandom(len: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(len));
-}
-
-// Lazy viem import would couple the module; hosts pass keccak256 explicitly.
-// This fallback keeps `rand()` usable in browsers without configuration.
-function defaultKeccak(bytes: Uint8Array): `0x${string}` {
-  // Synchronous keccak is not in stdlib — hosts must inject viem's keccak256.
-  throw new Error('rand: pass keccak256 (e.g. viem `keccak256`) explicitly in non-viem hosts');
 }
 
 /** Address -> account name, for display and manager checks. */
