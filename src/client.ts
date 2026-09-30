@@ -180,8 +180,8 @@ export class MistClient {
     );
     p.notes.forEach((nn, i) => Object.assign(nn, { spent: true, nullifier: res.publicInputs[i] }));
     out.forEach((o, i) => {
-      if (o.Amount > 0 && o.id) {
-        this.notes.push({ reserve, id: o.id, blinding: o.Blinding, amount: BigInt(o.Amount), hash: res.publicInputs[2 + i], kind: i ? 'change' : 'received' });
+      if (o.Amount > 0n && o.id) {
+        this.notes.push({ reserve, id: o.id, blinding: o.Blinding, amount: o.Amount, hash: res.publicInputs[2 + i], kind: i ? 'change' : 'received' });
       }
     });
     return { receipt, secs };
