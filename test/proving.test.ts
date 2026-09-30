@@ -94,4 +94,21 @@ describe('proving adapter', () => {
     await expect(proveSpend({ hash2: (a) => a, spend: () => ({ status: 'error', error: 'bad' }) }, req)).rejects.toThrow('bad');
     expect(foldCiphertext((a, b) => `${a}+${b}`, ['x', 'y', 'z'])).toBe('x+y+z');
   });
+
+  it('rejects prover output with wrong proof length', async () => {
+    const req = buildSpendRequest({
+      chainId: 31337, chamber: '0x01', reserve: '0x02', token: '0x03', reserveConfig: '0',
+      owner: '1', ownerSecret: '', userKeyExchange: '0', keyIndex: 0,
+      inputs: [], outputs: [{ id: null, Owner: '0', Blinding: '0', Amount: 0n }, { id: null, Owner: '0', Blinding: '0', Amount: 0n }],
+      withdraw: 0n, withdrawTo: '0', txLeaves: [], stateLeaves: [], userLeaves: [],
+    });
+    await expect(proveSpend(
+      { hash2: (a) => a, spend: () => ({ status: 'success', proof: ['1'], publicInputs: Array(14).fill('0') }) },
+      req,
+    )).rejects.toThrow(/proof elements/);
+    await expect(proveSpend(
+      { hash2: (a) => a, spend: () => ({ status: 'success', proof: Array(8).fill('0'), publicInputs: ['1'] }) },
+      req,
+    )).rejects.toThrow(/public inputs/);
+  });
 });
