@@ -170,7 +170,11 @@ export class MistClient {
       encodeFunctionData({
         abi: CHAMBER_MIN,
         functionName: 'handleZkp',
-        args: [res.proof.map(BigInt), res.publicInputs.map(BigInt), (res.ciphertext ?? []).map(BigInt)],
+        args: [
+          res.proof.map(BigInt) as unknown as readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint],
+          res.publicInputs.map(BigInt) as unknown as readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint],
+          (res.ciphertext ?? []).map(BigInt),
+        ],
       }),
       'handleZkp',
     );
