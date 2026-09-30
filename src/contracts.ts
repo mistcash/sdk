@@ -1,7 +1,8 @@
 // Contract surface extracted from `playground/chain.js` (runtime ABI) and
 // `playground/explorer.js` ABIS (from `forge inspect <contract> abi`).
-// Human-readable ABI strings: hosts call viem `parseAbi()` themselves, so the
-// SDK never imports viem and stays bundler-neutral.
+// The SDK imports viem for encoding and keccak (identity, pq, client), but
+// the ChainAdapter keeps it independent of any one client library for
+// transport.
 
 import type { Hex } from './types.js';
 
