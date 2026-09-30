@@ -1,31 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { buildSpendRequest, foldCiphertext, proveSpend, serializeSpendRequest } from '../src/proving.js';
+import { buildSpendRequest, foldCiphertext, proveSpend, serializeSpendRequest, type SpendInNote, type SpendOutNote } from '../src/proving.js';
 
 describe('proving adapter', () => {
-  it('pads inputs to two slots', () => {
-    const req = buildSpendRequest({
+  it('pads inputs to two slots with random dummy blinding', () => {
+    const opts = {
       chainId: 31337,
-      chamber: '0x01',
-      reserve: '0x02',
-      token: '0x03',
+      chamber: '0x01' as const,
+      reserve: '0x02' as const,
+      token: '0x03' as const,
       reserveConfig: '0',
       owner: '1',
       ownerSecret: '',
       userKeyExchange: '0',
       keyIndex: 7,
-      inputs: [{ Blinding: '1', Amount: 10n }],
+      inputs: [{ Blinding: '1', Amount: 10n }] as SpendInNote[],
       outputs: [
         { id: 'bob (MIST)', Owner: '2', Blinding: '3', Amount: 4n },
         { id: 'alice (MIST)', Owner: '1', Blinding: '5', Amount: 6n },
-      ],
+      ] as SpendOutNote[],
       withdraw: 0n,
-      withdrawTo: '0',
-      txLeaves: [],
-      stateLeaves: [],
-      userLeaves: [],
-    });
-    expect(req.In).toHaveLength(2);
-    expect(req.KeyIndex).toBe(7);
+      withdrawTo: '0' as const,
+      txLeaves: [] as string[],
+      stateLeaves: [] as string[],
+      userLeaves: [] as string[],
+    };
+    const a = buildSpendRequest(opts);
+    const b = buildSpendRequest(opts);
+    expect(a.In).toHaveLength(2);
+    expect(a.KeyIndex).toBe(7);
+    expect(a.In[1].Blinding).not.toBe(b.In[1].Blinding);
+    expect(a.In[1].Amount).toBe(0n);
   });
 
   it('serializes bigint amounts as bare JSON numbers', () => {
