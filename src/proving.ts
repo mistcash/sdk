@@ -4,6 +4,7 @@
 // from their own loader (`core-deploy/js` `createMist`, a browser fetcher, or
 // a test mock) via `ProverAdapter`.
 
+import { rand } from './identity.js';
 import type { Hex } from './types.js';
 
 export interface SpendInNote {
@@ -88,7 +89,7 @@ export function buildSpendRequest(opts: {
     OwnerSecret: opts.ownerSecret,
     UserKeyExchange: opts.userKeyExchange,
     KeyIndex: opts.keyIndex ?? Math.floor(Math.random() * 256),
-    In: [...opts.inputs, { Blinding: '0', Amount: 0n }].slice(0, 2),
+    In: [...opts.inputs, { Blinding: rand(), Amount: 0n }].slice(0, 2),
     Out: opts.outputs,
     Withdraw: opts.withdraw,
     WithdrawTo: opts.withdrawTo,
