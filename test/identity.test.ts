@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { account, isMist, OWNER_KEYWORD, ownerOf, secretOf } from '../src/identity.js';
+import { account, isMist, OWNER_KEYWORD, ownerOf, rand, secretOf } from '../src/identity.js';
 
 const keccakOf = (label: string) => () => label as `0x${string}`;
 
@@ -26,6 +26,14 @@ describe('identity', () => {
     const hash2 = (a: string) => a;
     expect(() => ownerOf('alice (MIST)', { hash2 })).toThrow(/secret required/);
     expect(() => ownerOf('alice', { hash2 })).toThrow(/address required/);
-    expect(keccakOf('x')).toBeDefined();
+  });
+
+  it('rand() returns a field element below 2^248 and differs between calls', () => {
+    const a = rand();
+    const b = rand();
+    const limit = 1n << 248n;
+    expect(BigInt(a)).toBeLessThan(limit);
+    expect(BigInt(b)).toBeLessThan(limit);
+    expect(a).not.toBe(b);
   });
 });
