@@ -33,7 +33,7 @@ const prover = {
       status: 'success',
       proof: ['1', '2', '3', '4', '5', '6', '7', '8'],
       publicInputs: ['10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'],
-      ciphertext: [],
+      commitments: [],
     }) as never,
 };
 
@@ -71,16 +71,26 @@ describe('MistClient', () => {
 
   it('spends with injected state and mock prover', async () => {
     const seen: string[] = [];
+    const commitmentsProver = {
+      hash2: () => '123',
+      spend: async () =>
+        ({
+          status: 'success',
+          proof: ['1', '2', '3', '4', '5', '6', '7', '8'],
+          publicInputs: ['10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'],
+          commitments: ['999', '888'],
+        }) as never,
+    };
     const client = new MistClient({
       book: BOOK,
       chainId: 31337,
       chain: mockChain(seen),
-      prover,
+      prover: commitmentsProver,
       secretOf: () => 's',
       addressOf: () => '0x6666666666666666666666666666666666666666' as Hex,
     });
     client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
-    const { secs } = await client.spend({
+    const { secs, commitments } = await client.spend({
       id: 'alice',
       amount: 40n,
       to: 'bob',
@@ -90,6 +100,7 @@ describe('MistClient', () => {
       state: { txLeaves: [], stateLeaves: [], userLeaves: [], reserveConfig: '7', reserveUsers: 0n, ukx: '0' },
     });
     expect(typeof secs).toBe('number');
+    expect(commitments).toEqual(['999', '888']);
     expect(seen).toEqual([BOOK.chamber]);
     expect(client.notes.filter((x) => !x.spent)).toHaveLength(2);
   });
