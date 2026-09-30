@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { account, isMist, OWNER_KEYWORD, ownerOf, rand, secretOf } from '../src/identity.js';
 
-const keccakOf = (label: string) => () => label as `0x${string}`;
-
 describe('identity', () => {
   it('splits account and detects MIST', () => {
     expect(account('alice (MIST)')).toBe('alice');
