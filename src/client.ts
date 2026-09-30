@@ -7,7 +7,7 @@
 import { encodeAbiParameters, encodeFunctionData, parseAbiParameters } from 'viem';
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
-import { buildSpendRequest, proveSpend, type ProverAdapter, type SpendRequest } from './proving.js';
+import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, type ProverAdapter, type SpendRequest } from './proving.js';
 import type { AddressBook } from './contracts.js';
 import type { ChainAdapter, Hex, MistCallbacks, Note, StorageAdapter, TxReceipt } from './types.js';
 
@@ -48,6 +48,8 @@ export interface SpendOpts {
   blindingA?: string;
   /** Blinding for the change output. */
   blindingB?: string;
+  /** Explicit key index (else CSPRNG unused index). */
+  keyIndex?: number;
   /** Fetched chain state; when omitted the client reads it via the adapter. */
   state?: {
     txLeaves: string[];
@@ -70,6 +72,8 @@ export class MistClient {
   notes: Note[] = [];
   /** Key exchanges by `${reserve}:${owner}` (mirrors `state.ukx`). */
   ukx: Record<string, string> = {};
+  /** Used key indices per ukx, for CSPRNG selection. */
+  usedKeyIndices: Map<string, Set<number>> = new Map();
 
   constructor(opts: MistClientOpts) {
     this.book = opts.book;
@@ -141,6 +145,8 @@ export class MistClient {
     if ('error' in p) throw new Error(p.error);
 
     const owner = this.ownerFor(opts.id);
+    const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
+    const keyIndex = opts.keyIndex ?? pickUnusedKeyIndex(this.getUsedIndices(ukx));
     const out: SpendRequest['Out'] = [
       { id: opts.to ?? null, Owner: opts.to ? this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
       { id: opts.id, Owner: owner, Blinding: opts.blindingB ?? rand(), Amount: p.change },
@@ -153,7 +159,8 @@ export class MistClient {
       reserveConfig: st.reserveConfig,
       owner,
       ownerSecret: isMist(opts.id) ? this.secretOf(opts.id) : '',
-      userKeyExchange: st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0',
+      userKeyExchange: ukx,
+      keyIndex,
       inputs: p.notes.map((nn) => ({ Blinding: nn.blinding, Amount: nn.amount })),
       outputs: out,
       withdraw: opts.withdraw ?? 0n,
@@ -179,6 +186,7 @@ export class MistClient {
       }),
       'handleZkp',
     );
+    this.recordUsedIndex(ukx, keyIndex);
     p.notes.forEach((nn, i) => Object.assign(nn, { spent: true, nullifier: res.publicInputs[i] }));
     out.forEach((o, i) => {
       if (o.Amount > 0n && o.id) {
@@ -281,6 +289,42 @@ export class MistClient {
 
   total(notes: Note[] = this.notes): bigint {
     return total(notes.filter((x) => !x.spent));
+  }
+
+  /** Get used key indices for a ukx, loading from store if available. */
+  private getUsedIndices(ukx: string): Set<number> {
+    let used = this.usedKeyIndices.get(ukx);
+    if (!used) {
+      used = new Set();
+      this.usedKeyIndices.set(ukx, used);
+    }
+    return used;
+  }
+
+  /** Record a used key index after successful submit and persist. */
+  private recordUsedIndex(ukx: string, keyIndex: number): void {
+    this.getUsedIndices(ukx).add(keyIndex);
+    this.persistKeyIndices();
+  }
+
+  private persistKeyIndices(): void {
+    if (!this.store) return;
+    const obj: Record<string, number[]> = {};
+    for (const [ukx, used] of this.usedKeyIndices) {
+      if (used.size > 0) obj[ukx] = [...used];
+    }
+    this.store.set('mist:keyIndices', JSON.stringify(obj));
+  }
+
+  /** Restore used key indices from store (call after construction). */
+  async restoreKeyIndices(): Promise<void> {
+    if (!this.store) return;
+    const raw = await this.store.get('mist:keyIndices');
+    if (!raw) return;
+    const obj = JSON.parse(raw) as Record<string, number[]>;
+    for (const [ukx, indices] of Object.entries(obj)) {
+      this.usedKeyIndices.set(ukx, new Set(indices));
+    }
   }
 
   private defaultReserve(): Hex {

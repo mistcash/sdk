@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSpendRequest, foldCiphertext, proveSpend, serializeSpendRequest, type SpendInNote, type SpendOutNote } from '../src/proving.js';
+import { buildSpendRequest, foldCiphertext, pickUnusedKeyIndex, proveSpend, serializeSpendRequest, type SpendInNote, type SpendOutNote } from '../src/proving.js';
 
 describe('proving adapter', () => {
   it('pads inputs to two slots with random dummy blinding', () => {
@@ -110,5 +110,22 @@ describe('proving adapter', () => {
       { hash2: (a) => a, spend: () => ({ status: 'success', proof: Array(8).fill('0'), publicInputs: ['1'] }) },
       req,
     )).rejects.toThrow(/public inputs/);
+  });
+
+  it('pickUnusedKeyIndex selects from unused range and throws when exhausted', () => {
+    const used = new Set<number>();
+    const a = pickUnusedKeyIndex(used);
+    const b = pickUnusedKeyIndex(used);
+    expect(a).toBeGreaterThanOrEqual(0);
+    expect(a).toBeLessThan(256);
+    expect(b).toBeGreaterThanOrEqual(0);
+    expect(b).toBeLessThan(256);
+    const almostFull = new Set(Array.from({ length: 255 }, (_, i) => i));
+    const last = pickUnusedKeyIndex(almostFull);
+    expect(last).toBeGreaterThanOrEqual(0);
+    expect(last).toBeLessThan(256);
+    expect(almostFull.has(last)).toBe(false);
+    const full = new Set(Array.from({ length: 256 }, (_, i) => i));
+    expect(() => pickUnusedKeyIndex(full)).toThrow(/256 key indices/);
   });
 });

@@ -89,7 +89,7 @@ export function buildSpendRequest(opts: {
     Owner: opts.owner,
     OwnerSecret: opts.ownerSecret,
     UserKeyExchange: opts.userKeyExchange,
-    KeyIndex: opts.keyIndex ?? Math.floor(Math.random() * 256),
+    KeyIndex: opts.keyIndex ?? randomKeyIndex(),
     In: [...opts.inputs, { Blinding: rand(), Amount: 0n }].slice(0, 2),
     Out: opts.outputs,
     Withdraw: opts.withdraw,
@@ -133,4 +133,28 @@ export async function proveSpend(
 /** Fold an auditor ciphertext to its commitment (for `openPayload` checks). */
 export function foldCiphertext(hash2: (a: string, b: string) => string, ciphertext: string[]): string {
   return ciphertext.slice(1).reduce((acc, c) => hash2(acc, c), ciphertext[0]);
+}
+
+const KEY_INDEX_MAX = 256; // KeyIndexBits = 8
+
+/** CSPRNG key index in [0, 255]. */
+export function randomKeyIndex(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0] % KEY_INDEX_MAX;
+}
+
+/**
+ * Pick an unused key index for a given ukx. Draws from the CSPRNG among
+ * indices not yet used. Throws when all 256 are exhausted.
+ */
+export function pickUnusedKeyIndex(used: Set<number>): number {
+  if (used.size >= KEY_INDEX_MAX) throw new Error('All 256 key indices used for this ukx');
+  const available = KEY_INDEX_MAX - used.size;
+  let idx = crypto.getRandomValues(new Uint32Array(1))[0] % available;
+  for (let i = 0; i < KEY_INDEX_MAX; i++) {
+    if (!used.has(i)) {
+      if (idx === 0) return i;
+      idx--;
+    }
+  }
+  throw new Error('All 256 key indices used for this ukx');
 }
