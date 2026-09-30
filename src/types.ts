@@ -49,8 +49,6 @@ export interface ChainAdapter {
   sendTransaction: (tx: { to: Hex; data: Hex; value?: bigint }) => Promise<SentTx>;
   /** Contract events, e.g. `UserRegistered` leaves. Optional if unused. */
   getEvents?: (address: Hex, eventName: string, fromBlock?: bigint) => Promise<Array<{ args: Record<string, unknown> }>>;
-  /** Raw transaction input by hash (for auditor `openPayload` checks). */
-  getTransaction?: (hash: Hex) => Promise<{ input: Hex }>;
 }
 
 /** Lifecycle hooks. All optional; set them to observe or fan out tx handling. */

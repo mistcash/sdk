@@ -58,7 +58,7 @@ export type SpendResult = SpendSuccess | SpendFailure;
 export interface ProverAdapter {
   hash2: (a: string, b: string) => string;
   spend: (json: string) => SpendResult | Promise<SpendResult>;
-  decrypt?: (ukx: string, token: Hex, ciphertext: string[]) => unknown;
+  decrypt?: (ukx: string, commitments: string[]) => { keyIndex: number; plaintext: string[] } | null;
 }
 
 /** Build the prover request; mirrors `app.js spendNotes` field order. */
