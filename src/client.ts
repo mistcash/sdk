@@ -221,15 +221,13 @@ export class MistClient {
    * Try each member key exchange on a payload until one opens it (manager side).
    * Mirrors `app.js openPayload`.
    */
-  async openPayload(opts: { reserve: Hex; ciphertext: string[]; txHash: Hex }): Promise<{ id?: string; plaintext?: unknown; matches: boolean }> {
+  openPayload(opts: { reserve: Hex; commitments: string[] }): { owner: string; keyIndex: number; plaintext: string[] } | null {
     if (!this.prover.decrypt) throw new Error('Prover predates decrypt: rebuild mist.wasm.');
-    const tx = await this.chain.getTransaction?.(opts.txHash);
-    void tx;
     for (const [key, ukx] of Object.entries(this.ukx).filter(([k]) => k.startsWith(`${opts.reserve}:`))) {
-      const hit = this.prover.decrypt(ukx, this.book.token, opts.ciphertext) as { plaintext?: unknown } | undefined;
-      if (hit) return { id: key.split(':')[1], plaintext: hit.plaintext ?? hit, matches: true };
+      const hit = this.prover.decrypt(ukx, opts.commitments);
+      if (hit) return { owner: key.split(':')[1], keyIndex: hit.keyIndex, plaintext: hit.plaintext };
     }
-    return { matches: false };
+    return null;
   }
 
   // ── Owner / manager admin ────────────────────────────────────────────────
