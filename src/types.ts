@@ -31,9 +31,11 @@ export interface SentTx {
 }
 
 /**
- * Transport injected by the host. The SDK never imports viem/ethers directly —
- * it only talks through this interface, so tests can pass a mock and apps can
- * route MIST-owner spends through a relayer while public spends go direct.
+ * Transport injected by the host. The SDK imports viem for encoding and
+ * keccak (identity, pq, client), but the ChainAdapter keeps it independent
+ * of any one client library for transport, so tests can pass a mock and
+ * apps can route MIST-owner spends through a relayer while public spends
+ * go direct.
  *
  * Mirrors `open-agent-26/sdk` `ChainAdapter` (`getTxArray` + `sendTransaction`),
  * extended with the reads `playground/chain.js` needs (`readContract`,
