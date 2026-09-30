@@ -135,6 +135,7 @@ export class MistClient {
     const notes = opts.notes ?? this.notes;
     const reserve = opts.reserve ?? this.defaultReserve();
     const amount = opts.amount + (opts.withdraw ?? 0n);
+    if ((opts.withdraw ?? 0n) > 0n && !opts.withdrawTo) throw new Error('withdrawTo is required for withdrawals');
     const st = opts.state ?? (await this.spendState(reserve, opts.id));
     const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember: this.isMember(reserve, opts.id), notes });
     if ('error' in p) throw new Error(p.error);

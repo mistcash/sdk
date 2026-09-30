@@ -69,6 +69,25 @@ describe('MistClient', () => {
     await expect(client.registerReserve('0x6666666666666666666666666666666666666666' as Hex, 1n, 2n)).rejects.toThrow(/vetoed/);
   });
 
+  it('rejects withdrawal without recipient', async () => {
+    const client = new MistClient({
+      book: BOOK,
+      chainId: 31337,
+      chain: mockChain([]),
+      prover,
+      secretOf: () => 's',
+      addressOf: () => '0x6666666666666666666666666666666666666666' as Hex,
+    });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    await expect(client.spend({
+      id: 'alice',
+      amount: 0n,
+      withdraw: 40n,
+      reserve: BOOK.reserve,
+      state: { txLeaves: [], stateLeaves: [], userLeaves: [], reserveConfig: '7', reserveUsers: 0n, ukx: '0' },
+    })).rejects.toThrow(/withdrawTo/);
+  });
+
   it('spends with injected state and mock prover', async () => {
     const seen: string[] = [];
     const commitmentsProver = {
