@@ -4,6 +4,7 @@
 // from their own loader (`core-deploy/js` `createMist`, a browser fetcher, or
 // a test mock) via `ProverAdapter`.
 
+import { PUBLIC_INPUTS } from './contracts.js';
 import { rand } from './identity.js';
 import type { Hex } from './types.js';
 
@@ -123,7 +124,10 @@ export async function proveSpend(
   if (res.status !== 'success') {
     throw new Error((res as SpendFailure).error ?? 'Prover rejected the spend');
   }
-  return { res: res as SpendSuccess, secs: (Date.now() - t) / 1000 };
+  const ok = res as SpendSuccess;
+  if (ok.proof.length !== 8) throw new Error(`Prover returned ${ok.proof.length} proof elements, expected 8`);
+  if (ok.publicInputs.length !== PUBLIC_INPUTS.length) throw new Error(`Prover returned ${ok.publicInputs.length} public inputs, expected ${PUBLIC_INPUTS.length}`);
+  return { res: ok, secs: (Date.now() - t) / 1000 };
 }
 
 /** Fold an auditor ciphertext to its commitment (for `openPayload` checks). */
