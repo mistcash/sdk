@@ -8,14 +8,14 @@ import type { Hex } from './types.js';
 
 export interface SpendInNote {
   Blinding: string;
-  Amount: string;
+  Amount: bigint;
 }
 
 export interface SpendOutNote {
   id: string | null;
   Owner: string;
   Blinding: string;
-  Amount: number;
+  Amount: bigint;
 }
 
 /** The JSON the Go prover consumes (`app.js` `req`). */
@@ -31,7 +31,7 @@ export interface SpendRequest {
   KeyIndex: number;
   In: SpendInNote[];
   Out: SpendOutNote[];
-  Withdraw: number;
+  Withdraw: bigint;
   WithdrawTo: Hex | '0';
   TxLeaves: string[];
   StateLeaves: string[];
@@ -72,7 +72,7 @@ export function buildSpendRequest(opts: {
   keyIndex?: number;
   inputs: SpendInNote[];
   outputs: SpendOutNote[];
-  withdraw: number;
+  withdraw: bigint;
   withdrawTo: Hex | '0';
   txLeaves: string[];
   stateLeaves: string[];
@@ -88,7 +88,7 @@ export function buildSpendRequest(opts: {
     OwnerSecret: opts.ownerSecret,
     UserKeyExchange: opts.userKeyExchange,
     KeyIndex: opts.keyIndex ?? Math.floor(Math.random() * 256),
-    In: [...opts.inputs, { Blinding: '0', Amount: '0' }].slice(0, 2),
+    In: [...opts.inputs, { Blinding: '0', Amount: 0n }].slice(0, 2),
     Out: opts.outputs,
     Withdraw: opts.withdraw,
     WithdrawTo: opts.withdrawTo,
@@ -98,13 +98,27 @@ export function buildSpendRequest(opts: {
   };
 }
 
+/** Serialize a SpendRequest to JSON, emitting bigints as bare numbers. */
+export function serializeSpendRequest(req: SpendRequest): string {
+  const maxUint64 = 2n ** 64n;
+  for (const n of req.In) {
+    if (n.Amount < 0n || n.Amount >= maxUint64) throw new Error(`In.Amount ${n.Amount} out of uint64 range`);
+  }
+  for (const n of req.Out) {
+    if (n.Amount < 0n || n.Amount >= maxUint64) throw new Error(`Out.Amount ${n.Amount} out of uint64 range`);
+  }
+  if (req.Withdraw < 0n || req.Withdraw >= maxUint64) throw new Error(`Withdraw ${req.Withdraw} out of uint64 range`);
+  const raw = JSON.stringify(req, (_key, value) => typeof value === 'bigint' ? `__BN_${value}_BN__` : value);
+  return raw.replace(/"__BN_(\d+)_BN__"/g, '$1');
+}
+
 /** Run the prover and normalize failures to thrown Errors with timing. */
 export async function proveSpend(
   prover: ProverAdapter,
   req: SpendRequest,
 ): Promise<{ res: SpendSuccess; secs: number }> {
   const t = Date.now();
-  const res = await prover.spend(JSON.stringify(req));
+  const res = await prover.spend(serializeSpendRequest(req));
   if (res.status !== 'success') {
     throw new Error((res as SpendFailure).error ?? 'Prover rejected the spend');
   }
