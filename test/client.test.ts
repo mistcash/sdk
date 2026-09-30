@@ -27,8 +27,14 @@ function mockChain(seen: string[]): ChainAdapter {
 }
 
 const prover = {
-  hash2: (a: string, b: string) => `h2(${a},${b})`,
-  spend: async () => ({ status: 'success', proof: ['1'], publicInputs: ['10', '11', '12', '13'], ciphertext: [] }) as never,
+  hash2: () => '123',
+  spend: async () =>
+    ({
+      status: 'success',
+      proof: ['1', '2', '3', '4', '5', '6', '7', '8'],
+      publicInputs: ['10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'],
+      ciphertext: [],
+    }) as never,
 };
 
 describe('MistClient', () => {
@@ -58,9 +64,9 @@ describe('MistClient', () => {
       prover,
       callbacks: { onBeforeSend: () => false },
       secretOf: () => 's',
-      addressOf: () => '0x01' as Hex,
+      addressOf: () => '0x6666666666666666666666666666666666666666' as Hex,
     });
-    await expect(client.registerReserve('0x01' as Hex, 1n, 2n)).rejects.toThrow(/vetoed/);
+    await expect(client.registerReserve('0x6666666666666666666666666666666666666666' as Hex, 1n, 2n)).rejects.toThrow(/vetoed/);
   });
 
   it('spends with injected state and mock prover', async () => {
@@ -71,7 +77,7 @@ describe('MistClient', () => {
       chain: mockChain(seen),
       prover,
       secretOf: () => 's',
-      addressOf: () => '0x01' as Hex,
+      addressOf: () => '0x6666666666666666666666666666666666666666' as Hex,
     });
     client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
     const { secs } = await client.spend({
