@@ -5,7 +5,7 @@
 // spends through a relayer while public spends go direct.
 
 import { encodeAbiParameters, encodeFunctionData, parseAbiParameters } from 'viem';
-import { account, isMist, ownerOf } from './identity.js';
+import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, proveSpend, type ProverAdapter, type SpendRequest } from './proving.js';
 import type { AddressBook } from './contracts.js';
@@ -141,8 +141,8 @@ export class MistClient {
 
     const owner = this.ownerFor(opts.id);
     const out: SpendRequest['Out'] = [
-      { id: opts.to ?? null, Owner: opts.to ? this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? '0', Amount: opts.amount },
-      { id: opts.id, Owner: owner, Blinding: opts.blindingB ?? '0', Amount: p.change },
+      { id: opts.to ?? null, Owner: opts.to ? this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
+      { id: opts.id, Owner: owner, Blinding: opts.blindingB ?? rand(), Amount: p.change },
     ];
     const req = buildSpendRequest({
       chainId: this.chainId,
