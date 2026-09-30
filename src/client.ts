@@ -141,8 +141,8 @@ export class MistClient {
 
     const owner = this.ownerFor(opts.id);
     const out: SpendRequest['Out'] = [
-      { id: opts.to ?? null, Owner: opts.to ? this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? '0', Amount: Number(opts.amount) },
-      { id: opts.id, Owner: owner, Blinding: opts.blindingB ?? '0', Amount: Number(p.change) },
+      { id: opts.to ?? null, Owner: opts.to ? this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? '0', Amount: opts.amount },
+      { id: opts.id, Owner: owner, Blinding: opts.blindingB ?? '0', Amount: p.change },
     ];
     const req = buildSpendRequest({
       chainId: this.chainId,
@@ -153,9 +153,9 @@ export class MistClient {
       owner,
       ownerSecret: isMist(opts.id) ? this.secretOf(opts.id) : '',
       userKeyExchange: st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0',
-      inputs: p.notes.map((nn) => ({ Blinding: nn.blinding, Amount: String(nn.amount) })),
+      inputs: p.notes.map((nn) => ({ Blinding: nn.blinding, Amount: nn.amount })),
       outputs: out,
-      withdraw: Number(opts.withdraw ?? 0),
+      withdraw: opts.withdraw ?? 0n,
       withdrawTo: opts.withdraw && opts.withdrawTo ? this.addressOf(opts.withdrawTo) : '0',
       txLeaves: st.txLeaves,
       stateLeaves: st.stateLeaves,
