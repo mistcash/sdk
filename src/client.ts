@@ -8,6 +8,7 @@ import { encodeAbiParameters, encodeFunctionData, parseAbiParameters } from 'vie
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, type ProverAdapter, type SpendRequest } from './proving.js';
+import { deriveUkx, encapsulate } from './pq.js';
 import type { AddressBook } from './contracts.js';
 import type { ChainAdapter, Hex, MistCallbacks, Note, StorageAdapter, TxReceipt } from './types.js';
 
@@ -207,16 +208,15 @@ export class MistClient {
     id: string;
     reserve: Hex;
     managerPublicKey: Uint8Array;
-    managerSide: (cipherText: Uint8Array) => { sharedSecret: Uint8Array; signature: Hex; digest?: Hex };
-    deriveUkx: (secret: Uint8Array, reserve: Hex, mistAddr: string) => string;
-    encapsulate: (pk: Uint8Array) => { cipherText: Uint8Array; sharedSecret: Uint8Array };
+    managerSide: (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) => { ukx: string; signature: Hex };
   }): Promise<{ ukx: string }> {
     const { id, reserve } = opts;
     this.progress('Exchanging keys');
-    const { cipherText, sharedSecret } = opts.encapsulate(opts.managerPublicKey);
-    const { sharedSecret: _m, signature } = opts.managerSide(cipherText);
+    const { cipherText, sharedSecret } = encapsulate(opts.managerPublicKey);
     const mistAddr = this.ownerFor(id);
-    const ukx = opts.deriveUkx(sharedSecret, reserve, mistAddr);
+    const ukx = deriveUkx(sharedSecret, reserve, mistAddr);
+    const { ukx: managerUkx, signature } = opts.managerSide({ cipherText, reserve, mistAddr });
+    if (ukx !== managerUkx) throw new Error('Client and manager derived different ukx values');
     this.progress('Registering');
     const data = encodeAbiParameters(parseAbiParameters('uint256, uint256, bytes'), [BigInt(mistAddr), BigInt(ukx), signature]);
     await this.write(reserve, encodeFunctionData({ abi: RESERVE_MIN, functionName: 'registerUser', args: [data] }), 'registerUser');
