@@ -43,7 +43,7 @@ export interface SpendSuccess {
   status: 'success';
   proof: string[];
   publicInputs: string[];
-  ciphertext?: string[];
+  commitments?: string[];
 }
 
 export interface SpendFailure {
