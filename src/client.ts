@@ -26,7 +26,6 @@ export interface MistClientOpts {
 }
 
 export interface DepositOpts {
-  who: string;
   reserve: Hex;
   /** Identity the note belongs to (`alice` or `alice (MIST)`). */
   id: string;
@@ -112,7 +111,7 @@ export class MistClient {
 
   /** Approve + deposit into a reserve vault. Returns the new local note. */
   async deposit(opts: DepositOpts): Promise<Note> {
-    const { who: _who, reserve, id, amount, blinding } = opts;
+    const { reserve, id, amount, blinding } = opts;
     if (amount <= 0n) throw new Error('Enter a whole amount above zero.');
     const owner = this.ownerFor(id);
     const commitment = this.prover.hash2(blinding, owner);
