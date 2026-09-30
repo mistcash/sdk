@@ -50,7 +50,7 @@ describe('MistClient', () => {
       secretOf: () => 's',
       addressOf: () => '0x6666666666666666666666666666666666666666' as Hex,
     });
-    const note = await client.deposit({ who: 'alice', reserve: BOOK.reserve, id: 'alice (MIST)', amount: 100n, blinding: '9' });
+    const note = await client.deposit({ reserve: BOOK.reserve, id: 'alice (MIST)', amount: 100n, blinding: '9' });
     expect(note.amount).toBe(100n);
     expect(seen).toEqual([BOOK.token, BOOK.chamber]);
     expect(onTx).toHaveBeenCalledTimes(2);
