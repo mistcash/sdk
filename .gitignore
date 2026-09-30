@@ -1,0 +1,16 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build outputs
+dist
+coverage
+
+# Local env files
+.env
+.env.local
+
+# Misc
+.DS_Store
+*.pem
