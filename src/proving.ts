@@ -54,11 +54,11 @@ export interface SpendFailure {
 
 export type SpendResult = SpendSuccess | SpendFailure;
 
-/** Injected prover surface. `hash2` may be sync wasm or a pure fallback. */
+/** Injected prover surface. `hash2` may be sync wasm or async (worker). */
 export interface ProverAdapter {
-  hash2: (a: string, b: string) => string;
+  hash2: (a: string, b: string) => string | Promise<string>;
   spend: (json: string) => SpendResult | Promise<SpendResult>;
-  decrypt?: (ukx: string, commitments: string[]) => { keyIndex: number; plaintext: string[] } | null;
+  decrypt?: (ukx: string, commitments: string[]) => { keyIndex: number; plaintext: string[] } | null | Promise<{ keyIndex: number; plaintext: string[] } | null>;
 }
 
 /** Build the prover request; mirrors `app.js spendNotes` field order. */
@@ -131,8 +131,12 @@ export async function proveSpend(
 }
 
 /** Fold an auditor ciphertext to its commitment (for `openPayload` checks). */
-export function foldCiphertext(hash2: (a: string, b: string) => string, ciphertext: string[]): string {
-  return ciphertext.slice(1).reduce((acc, c) => hash2(acc, c), ciphertext[0]);
+export async function foldCiphertext(hash2: (a: string, b: string) => string | Promise<string>, ciphertext: string[]): Promise<string> {
+  let acc = ciphertext[0];
+  for (const c of ciphertext.slice(1)) {
+    acc = await hash2(acc, c);
+  }
+  return acc;
 }
 
 const KEY_INDEX_MAX = 256; // KeyIndexBits = 8
