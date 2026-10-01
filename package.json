@@ -14,12 +14,16 @@
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
+    "./prover": {
+      "types": "./dist/prover.d.ts",
+      "default": "./dist/prover.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
-  "sideEffects": false,
+  "sideEffects": ["./src/prover/wasm_exec.js", "./dist/prover/wasm_exec.js"],
   "engines": {
     "node": ">=20"
   },
@@ -27,9 +31,9 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "build": "tsup src/index.ts src/prover.ts --format esm,cjs --dts --clean",
     "sync:wasm": "node scripts/sync-wasm.mjs",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "dev": "tsup src/index.ts src/prover.ts --format esm,cjs --dts --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
