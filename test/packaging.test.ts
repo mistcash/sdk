@@ -9,6 +9,7 @@
 // fast. `npm run verify` builds first, so it always runs there.
 
 import { describe, expect, it, beforeAll } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -81,6 +82,39 @@ describe('packaging', () => {
     };
     const prover = await mod.loadProver(WASM_FILE);
     expect(prover.hash2('1', '2')).toMatch(/^\d+$/);
+  });
+
+  it.skipIf(!distExists)('resolves the node condition to the Node prover entry', () => {
+    // A package with an `exports` map can self-reference by name, so this
+    // exercises real Node resolution rather than a reimplementation of it.
+    // Node always applies the "node" condition, so the server-side entry is
+    // what a Node consumer must get — the whole reason the condition exists.
+    const script = "console.log(await import.meta.resolve('@mistcash/sdk/prover'))";
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+    }).trim();
+    expect(out).toMatch(/prover\.node\.js$/);
+  });
+
+  it.skipIf(!distExists)('resolves the root entry to the ESM build', () => {
+    const script = "console.log(await import.meta.resolve('@mistcash/sdk'))";
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+    }).trim();
+    expect(out).toMatch(/index\.js$/);
+  });
+
+  it.skipIf(!distExists)('offers a browser-usable default for every prover entry', () => {
+    // Bundlers resolve "browser"/"import" and fall through to "default"; the
+    // Node-only entry must never be the sole target of a browser-facing subpath.
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+      exports: Record<string, Record<string, string>>;
+    };
+    const prover = pkg.exports['./prover'];
+    expect(prover.node).toBe('./dist/prover.node.js');
+    expect(prover.default).toBe('./dist/prover.js');
   });
 
   it.skipIf(!distExists)('reports a missing wasm with an actionable message', async () => {
