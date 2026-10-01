@@ -11,6 +11,24 @@ function ensureLoaded(wasmUrl?: string) {
   return proverPromise;
 }
 
+/**
+ * Coerce a thrown value into something worth sending over postMessage.
+ * `err?.message ?? String(err)` is not enough: `??` only falls back on
+ * null/undefined, so an Error with an empty message would arrive as `""` and
+ * the caller would see a blank rejection.
+ */
+function describeError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  const message = (err as { message?: unknown } | null | undefined)?.message;
+  if (typeof message === 'string' && message) return message;
+  try {
+    return String(err);
+  } catch {
+    return 'unknown error';
+  }
+}
+
 export async function handleMessage(e: { data: Request }): Promise<void> {
   const { id, method, args, wasmUrl } = e.data;
   try {
@@ -25,7 +43,7 @@ export async function handleMessage(e: { data: Request }): Promise<void> {
     }
     self.postMessage({ id, result });
   } catch (err) {
-    self.postMessage({ id, error: (err as Error).message ?? String(err) });
+    self.postMessage({ id, error: describeError(err) });
   }
 }
 

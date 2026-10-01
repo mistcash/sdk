@@ -9,8 +9,6 @@ export type FullProverAdapter = {
 
 const REQUIRED_EXPORTS = ['spend', 'decrypt', 'hash2', 'hash3'] as const;
 
-let _instance: Promise<FullProverAdapter> | undefined;
-
 export type InstantiateFn = (
   go: { importObject: WebAssembly.Imports },
   source: string | URL | Response | ArrayBuffer | Uint8Array | undefined,
@@ -19,10 +17,17 @@ export type InstantiateFn = (
 export function createLoader(instantiate: InstantiateFn): (
   source?: string | URL | Response | Promise<Response> | ArrayBuffer | Uint8Array,
 ) => Promise<FullProverAdapter> {
+  // The memo belongs to this loader, not to this module. A module-level slot is
+  // shared by the Node and browser entry points when both are imported from
+  // source, so whichever loaded first would answer for both — and because tsup
+  // inlines a private copy of this module per entry, that inconsistency would
+  // only show up in unbundled code.
+  let instance: Promise<FullProverAdapter> | undefined;
+
   return (source?) => {
-    if (_instance) return _instance;
-    _instance = _load(source, instantiate).catch((e) => { _instance = undefined; throw e; });
-    return _instance;
+    if (instance) return instance;
+    instance = _load(source, instantiate).catch((e) => { instance = undefined; throw e; });
+    return instance;
   };
 }
 
