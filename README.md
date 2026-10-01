@@ -195,6 +195,25 @@ pulls in no wasm and no Go runtime, and the runtime is loaded lazily only if
 you call `loadProver`. Import `@mistcash/sdk/prover` from client code only —
 the `node` export condition is what keeps `node:fs` out of browser bundles.
 
+### Restore key indices at startup
+
+Chamber rejects a spend whose private-tx key has been used before, and that key
+is `H(userKeyExchange, keyIndex)`. The SDK draws `keyIndex` from a CSPRNG
+restricted to indices not already used for that exchange, but it only knows
+about indices it has seen this session.
+
+If you pass a `StorageAdapter`, **call `restoreKeyIndices()` once at startup**:
+
+```ts
+const client = new MistClient({ /* ... */ store: localStorageAdapter });
+await client.restoreKeyIndices();
+```
+
+Skip it and every session starts with an empty set, so a reload can redraw an
+index that was already spent and the spend will revert on-chain. Indices are
+merged into the store rather than overwriting it, so two clients sharing one
+adapter — two tabs, for instance — do not erase each other's.
+
 ### uint64 amount limit
 
 The prover's `SpendNote.Amount` is `uint64`. At 18 decimals, a single note
