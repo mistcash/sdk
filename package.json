@@ -46,7 +46,9 @@
     "prepack": "node scripts/prepack.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "test:dist": "npm run build && vitest run test/packaging.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run build && npm test"
   },
   "peerDependencies": {
     "viem": "^2.0.0"

@@ -21,7 +21,20 @@ export const loadProver = createLoader(async (go, source) => {
     const result = await WebAssembly.instantiate(buf, go.importObject) as WebAssembly.WebAssemblyInstantiatedSource;
     return result.instance;
   }
-  const wasmBuffer = readFileSync(filePath);
-  const result = await WebAssembly.instantiate(wasmBuffer, go.importObject) as WebAssembly.WebAssemblyInstantiatedSource;
+  let wasmBuffer: Uint8Array;
+  try {
+    wasmBuffer = readFileSync(filePath);
+  } catch (cause) {
+    throw new Error(
+      `could not read mist.wasm at ${filePath}: ${(cause as NodeJS.ErrnoException)?.code ?? String(cause)}. ` +
+      'Vendor it with: MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm — ' +
+      'or pass the path (or the bytes) to loadProver().',
+      { cause },
+    );
+  }
+  if (wasmBuffer.length === 0) {
+    throw new Error(`mist.wasm at ${filePath} is empty — re-run npm run sync:wasm`);
+  }
+  const result = await WebAssembly.instantiate(wasmBuffer as BufferSource, go.importObject) as WebAssembly.WebAssemblyInstantiatedSource;
   return result.instance;
 });
