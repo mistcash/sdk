@@ -1,10 +1,10 @@
 import type { SpendResult } from './proving.js';
 
 export type FullProverAdapter = {
-  hash2: (a: string, b: string) => string;
-  hash3: (a: string, b: string, c: string) => string;
+  hash2: (a: string, b: string) => string | Promise<string>;
+  hash3: (a: string, b: string, c: string) => string | Promise<string>;
   spend: (json: string) => SpendResult | Promise<SpendResult>;
-  decrypt: (ukx: string, commitments: string[]) => { keyIndex: number; plaintext: string[] } | null;
+  decrypt: (ukx: string, commitments: string[]) => { keyIndex: number; plaintext: string[] } | null | Promise<{ keyIndex: number; plaintext: string[] } | null>;
 };
 
 const REQUIRED_EXPORTS = ['spend', 'decrypt', 'hash2', 'hash3'] as const;
@@ -115,4 +115,42 @@ async function instantiateNode(
 
 function isNode(): boolean {
   return typeof process !== 'undefined' && typeof process.versions?.node === 'string';
+}
+
+/**
+ * Create a prover that runs proving in a Web Worker, keeping the main
+ * thread responsive. Spawns a worker using the Vite/webpack 5 pattern.
+ *
+ * Browser only. Returns the same FullProverAdapter shape but all calls
+ * are async (proxied over postMessage).
+ */
+export function createWorkerProver(opts?: { wasmUrl?: string }): FullProverAdapter {
+  const worker = new Worker(new URL('./prover-worker.js', import.meta.url), { type: 'module' });
+  let _id = 0;
+  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+  worker.onmessage = (e: MessageEvent) => {
+    const { id, result, error } = e.data as { id: number; result?: unknown; error?: string };
+    const p = pending.get(id);
+    if (!p) return;
+    pending.delete(id);
+    if (error !== undefined) p.reject(new Error(error));
+    else p.resolve(result);
+  };
+
+  function call<T>(method: string, args: unknown[]): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const id = _id++;
+      pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      worker.postMessage({ id, method, args, wasmUrl: opts?.wasmUrl });
+    });
+  }
+
+  return {
+    hash2: (a: string, b: string) => call<string>('hash2', [a, b]),
+    hash3: (a: string, b: string, c: string) => call<string>('hash3', [a, b, c]),
+    spend: (json: string) => call<SpendResult>('spend', [json]),
+    decrypt: (ukx: string, commitments: string[]) =>
+      call<{ keyIndex: number; plaintext: string[] } | null>('decrypt', [ukx, commitments]),
+  };
 }
