@@ -289,6 +289,40 @@ describe('MistClient flows', () => {
     expect(JSON.parse(store.data.get('mist:keyIndices') ?? '')).toEqual({ '555': [7] });
   });
 
+  it('merges into a shared store instead of overwriting another client', async () => {
+    // Two tabs (or two MistClients) can share one StorageAdapter, and the whole
+    // map lives under a single key. A blind write would drop the other client's
+    // indices, and both tabs could then draw the same private-tx key for the
+    // same ukx — which Chamber rejects.
+    const store = mockStore();
+    const spend = async (ukx: string, keyIndex: number) => {
+      const { prover } = mockProver({ commitments: () => ['999'] });
+      const client = makeClient({ prover, store });
+      client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+      await client.spend({
+        id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve,
+        keyIndex, state: fixedState({ ukx }),
+      });
+    };
+
+    await spend('555', 3);
+    await spend('666', 4);
+    // A second client that already knew about index 3 for 555 must not erase it.
+    await spend('555', 9);
+
+    expect(JSON.parse(store.data.get('mist:keyIndices') ?? '')).toEqual({ '555': [3, 9], '666': [4] });
+  });
+
+  it('restores indices another client persisted', async () => {
+    const store = mockStore({ 'mist:keyIndices': JSON.stringify({ '555': [3, 9] }) });
+    const { prover } = mockProver({ commitments: () => ['999'] });
+    const client = makeClient({ prover, store });
+
+    await client.restoreKeyIndices();
+
+    expect(client.usedKeyIndices.get('555')).toEqual(new Set([3, 9]));
+  });
+
   it('leaves empty key-index sets out of the store', async () => {
     // A spend whose prover returned no commitments uses no private-tx key, so
     // its index must stay reusable — and its (empty) bookkeeping must not
