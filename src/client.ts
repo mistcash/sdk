@@ -191,7 +191,16 @@ export class MistClient {
       }),
       'handleZkp',
     );
-    if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedIndex(ukx, keyIndex);
+    // `commitments` is the load-bearing half of this guard, so it is worth stating
+// why. The prover returns them only when the sender is a registered member
+// (`if userLeaf != nil` in core-deploy/builders/wasm/main.go), and the private
+// tx key Chamber files the spend under is that array's first element — derived
+// from `UserEncryptionKey(ukx, KeyIndex)`. No member, no commitments, no
+// private tx key, so nothing to remember. The circuit pins AuditorCommitments
+// to 0 when the reserve has no users, which is why the prover cannot return a
+// non-empty set for an unregistered sender. Gating on `ukx !== '0'` alone
+// would over-record, not under-record.
+if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedIndex(ukx, keyIndex);
     p.notes.forEach((nn, i) => Object.assign(nn, { spent: true, nullifier: res.publicInputs[i] }));
     out.forEach((o, i) => {
       if (o.Amount > 0n && o.id) {
