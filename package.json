@@ -20,6 +20,7 @@
     },
     "./prover": {
       "types": "./dist/prover.d.ts",
+      "node": "./dist/prover.node.js",
       "default": "./dist/prover.js"
     },
     "./mist.wasm": "./wasm/mist.wasm",
@@ -31,7 +32,7 @@
     "wasm",
     "circuit.json"
   ],
-  "sideEffects": ["./src/prover/wasm_exec.js", "./dist/prover/wasm_exec.js"],
+  "sideEffects": false,
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
