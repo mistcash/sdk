@@ -40,7 +40,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && cp src/prover-worker.js dist/",
+    "build": "tsup",
     "sync:wasm": "node scripts/sync-wasm.mjs",
     "dev": "tsup --watch",
     "prepack": "node scripts/prepack.mjs",

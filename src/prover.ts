@@ -31,13 +31,16 @@ async function instantiateFromResponse(
 
 import type { SpendResult } from './proving.js';
 
-export function createWorkerProver(opts?: { wasmUrl?: string }): {
+export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
   hash2: (a: string, b: string) => Promise<string>;
   hash3: (a: string, b: string, c: string) => Promise<string>;
   spend: (json: string) => Promise<SpendResult>;
   decrypt: (ukx: string, commitments: string[]) => Promise<{ keyIndex: number; plaintext: string[] } | null>;
 } {
   const worker = new Worker(new URL('./prover-worker.js', import.meta.url), { type: 'module' });
+  const resolvedWasmUrl = opts?.wasmUrl !== undefined
+    ? String(opts.wasmUrl)
+    : new URL('../wasm/mist.wasm', import.meta.url).href;
   let _id = 0;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
@@ -54,7 +57,7 @@ export function createWorkerProver(opts?: { wasmUrl?: string }): {
     return new Promise<T>((resolve, reject) => {
       const id = _id++;
       pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      worker.postMessage({ id, method, args, wasmUrl: opts?.wasmUrl });
+      worker.postMessage({ id, method, args, wasmUrl: resolvedWasmUrl });
     });
   }
 
