@@ -1,5 +1,5 @@
 // @mistcash/sdk — modular MIST payments SDK.
-// Import per-module (`@mistcash/sdk/notes`) or everything from the root.
+// For the prover loader, import from '@mistcash/sdk/prover'.
 export * from './types.js';
 export * from './identity.js';
 export * from './contracts.js';
