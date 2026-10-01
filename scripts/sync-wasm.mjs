@@ -2,11 +2,17 @@
 // scripts/sync-wasm.mjs — vendor mist.wasm and wasm_exec.js from core-deploy.
 // Usage: npm run sync:wasm
 // Source: $MIST_CORE_DEPLOY/dist (default: ../core-deploy/dist)
+//
+// circuit.json records which circuits the wasm was built from. `core` is the
+// submodule holding the circuits and contracts, so its commit is the one that
+// matters when deciding whether a rebuild is needed; core-deploy is often just
+// a directory inside the `mist` superrepo, so record the repo that owns it
+// rather than assuming core-deploy is a checkout of its own.
 
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,15 +54,50 @@ try {
   if (m) goVersion = m[0];
 } catch { /* not available */ }
 
-let coreDeployCommit = 'unknown';
-const deployDir = process.env.MIST_CORE_DEPLOY ?? resolve(ROOT, '../core-deploy');
-try {
-  coreDeployCommit = execSync(`git -C ${deployDir} rev-parse --short HEAD`, { encoding: 'utf-8' }).trim();
-} catch { /* not a git repo */ }
+// Report the commit of the repo that owns `dir`, plus that repo's name, so a
+// directory that is merely a subdirectory of a superrepo is not mislabelled as
+// a checkout of its own.
+function owningRepo(dir) {
+  try {
+    const top = execSync(`git -C ${dir} rev-parse --show-toplevel`, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const commit = execSync(`git -C ${top} rev-parse HEAD`, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return { commit, repo: basename(top) };
+  } catch {
+    return { commit: 'unknown', repo: 'unknown' };
+  }
+}
 
-const circuit = { sha256, size, go: goVersion, coreDeployCommit, timestamp: new Date().toISOString() };
+const deployDir = process.env.MIST_CORE_DEPLOY
+  ? resolve(process.env.MIST_CORE_DEPLOY)
+  : resolve(ROOT, '../core-deploy');
+
+// The circuits and contracts: the submodule that decides whether a rebuild is
+// needed at all.
+const core = owningRepo(resolve(deployDir, '../core'));
+// The checkout that actually produced dist/mist.wasm.
+const deploy = owningRepo(deployDir);
+
+const circuit = {
+  sha256,
+  size,
+  go: goVersion,
+  core: { repo: core.repo, commit: core.commit },
+  builtFrom: { repo: deploy.repo, commit: deploy.commit },
+  timestamp: new Date().toISOString(),
+};
 writeFileSync(CIRCUIT_JSON, JSON.stringify(circuit, null, 2) + '\n');
 
 console.log(`synced mist.wasm (${(size / 1e6).toFixed(1)}MB, sha256:${sha256.slice(0, 12)}…)`);
 console.log(`synced wasm_exec.js`);
 console.log(`wrote circuit.json`);
+console.log(`  circuits: ${core.repo}@${core.commit.slice(0, 12)}`);
+console.log(`  built from: ${deploy.repo}@${deploy.commit.slice(0, 12)}`);
+if (core.commit === 'unknown') {
+  console.warn('  warning: could not resolve the `core` submodule commit');
+}
