@@ -7,7 +7,7 @@
 import { encodeAbiParameters, encodeFunctionData, parseAbiParameters } from 'viem';
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
-import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, type ProverAdapter, type SpendRequest } from './proving.js';
+import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, randomKeyIndex, type ProverAdapter, type SpendRequest } from './proving.js';
 import { deriveUkx, encapsulate } from './pq.js';
 import type { AddressBook } from './contracts.js';
 import type { ChainAdapter, Hex, MistCallbacks, Note, StorageAdapter, TxReceipt } from './types.js';
@@ -146,7 +146,7 @@ export class MistClient {
 
     const owner = this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
-    const keyIndex = opts.keyIndex ?? pickUnusedKeyIndex(this.getUsedIndices(ukx));
+    const keyIndex = opts.keyIndex ?? (ukx === '0' ? randomKeyIndex() : pickUnusedKeyIndex(this.getUsedIndices(ukx)));
     const out: SpendRequest['Out'] = [
       { id: opts.to ?? null, Owner: opts.to ? this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
       { id: opts.id, Owner: owner, Blinding: opts.blindingB ?? rand(), Amount: p.change },
@@ -186,7 +186,7 @@ export class MistClient {
       }),
       'handleZkp',
     );
-    this.recordUsedIndex(ukx, keyIndex);
+    if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) this.recordUsedIndex(ukx, keyIndex);
     p.notes.forEach((nn, i) => Object.assign(nn, { spent: true, nullifier: res.publicInputs[i] }));
     out.forEach((o, i) => {
       if (o.Amount > 0n && o.id) {
