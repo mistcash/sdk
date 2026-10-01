@@ -24,8 +24,13 @@ const importDist = (name: string) => import(/* @vite-ignore */ pathToFileURL(dis
 
 describe('packaging', () => {
   it.skipIf(!distExists)('ships every entry point the exports map advertises', async () => {
+    // Two different invariants, and conflating them makes this fail on a fresh
+    // clone: build outputs must exist here and now, while the vendored wasm is
+    // gitignored and only present after `npm run sync:wasm`. What actually
+    // matters for the tarball is that the wasm is *covered by* `files`.
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
       exports: Record<string, unknown>;
+      files: string[];
       main: string;
       module: string;
       types: string;
@@ -41,19 +46,22 @@ describe('packaging', () => {
       return out;
     };
 
-    const advertised = new Set<string>([pkg.main, pkg.module, pkg.types, ...collectStrings(pkg.exports)]);
+    const leaves = collectStrings(pkg.exports);
+    const isBuildOutput = (file: string) => file.startsWith('./dist/');
 
-    for (const file of advertised) {
-      // Skip the two kinds of leaf that are not build outputs: the package.json
-      // self-reference, and the vendored wasm / circuit metadata.
-      if (file === './package.json' || file.endsWith('.wasm') || file.endsWith('circuit.json')) continue;
-      expect(existsSync(resolve(ROOT, file)), `exports map points at a missing file: ${file}`).toBe(true);
+    for (const file of [pkg.main, pkg.module, pkg.types, ...leaves]) {
+      if (!isBuildOutput(file) || file === './package.json') continue;
+      expect(existsSync(resolve(ROOT, file)), `exports map points at a missing build output: ${file}`).toBe(true);
     }
 
-    // The vendored wasm is a real file in the package, not a build output, so
-    // it gets its own assertion rather than being skipped above.
-    for (const file of collectStrings(pkg.exports).filter((f) => f.endsWith('.wasm'))) {
-      expect(existsSync(resolve(ROOT, file)), `exports map points at a missing file: ${file}`).toBe(true);
+    for (const file of leaves.filter((f) => !isBuildOutput(f) && f !== './package.json')) {
+      // e.g. ./wasm/mist.wasm and ./circuit.json — shipped as-is, so `files`
+      // must cover them or they are advertised but absent from the tarball.
+      const dir = file.slice(2).split('/')[0];
+      expect(
+        pkg.files.includes(dir) || pkg.files.includes(file.slice(2)),
+        `exports map advertises ${file} but package.json "files" does not ship it`,
+      ).toBe(true);
     }
   });
 

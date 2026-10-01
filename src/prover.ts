@@ -51,6 +51,9 @@ export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
   hash3: (a: string, b: string, c: string) => Promise<string>;
   spend: (json: string) => Promise<SpendResult>;
   decrypt: (ukx: string, commitments: string[]) => Promise<{ keyIndex: number; plaintext: string[] } | null>;
+  /** Stop the worker and reject anything still in flight. Without this the
+   * worker (and its 16MB wasm) stays alive for the page's lifetime. */
+  terminate: () => void;
 } {
   const worker = new Worker(new URL('./prover-worker.js', import.meta.url), { type: 'module' });
   const resolvedWasmUrl = opts?.wasmUrl !== undefined
@@ -82,5 +85,12 @@ export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
     spend: (json: string) => call<SpendResult>('spend', [json]),
     decrypt: (ukx: string, commitments: string[]) =>
       call<{ keyIndex: number; plaintext: string[] } | null>('decrypt', [ukx, commitments]),
+    terminate: () => {
+      const err = new Error('prover worker terminated');
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      worker.onmessage = null;
+      worker.terminate();
+    },
   };
 }
