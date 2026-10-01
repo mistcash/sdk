@@ -1,0 +1,7 @@
+{
+  "sha256": "979e56ca38ecae387e304ce26222cf89687c4eb8534149aae488d381251e6e65",
+  "size": 16325312,
+  "go": "go1.26.4",
+  "coreDeployCommit": "aecc095",
+  "timestamp": "2026-10-01T18:18:30.695Z"
+}
