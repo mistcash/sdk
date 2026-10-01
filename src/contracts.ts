@@ -6,6 +6,25 @@
 
 import type { Hex } from './types.js';
 
+/**
+ * Deposit screening (core#157): a reserve's screener approves queued
+ * deposits into the tx tree; depositors reclaim pending or rejected ones.
+ */
+export const SCREENING_ABI = [
+  'function setReserveScreener(address reserve, address screener)',
+  'function reserveScreeners(address reserve) view returns (address)',
+  'function depositCount() view returns (uint256)',
+  'function pendingDeposits(uint256 depositId) view returns (address depositor, uint8 status, address reserve, address asset, uint256 amount, uint256 noteHash)',
+  'function approveDeposits(uint256[] depositIds, bytes32 evidence)',
+  'function rejectDeposits(uint256[] depositIds, bytes32 evidence)',
+  'function reclaimDeposit(uint256 depositId)',
+  'event ReserveScreenerSet(address indexed reserve, address indexed screener)',
+  'event DepositQueued(uint256 indexed depositId, uint256 noteHash, address indexed reserve, address indexed depositor, address asset, uint256 amount)',
+  'event DepositApproved(uint256 indexed depositId, uint256 indexed noteHash, bytes32 evidence)',
+  'event DepositRejected(uint256 indexed depositId, bytes32 evidence)',
+  'event DepositReclaimed(uint256 indexed depositId, address indexed depositor)',
+] as const;
+
 /** Calls the playground actually makes (`chain.js` abi). */
 export const CORE_ABI = [
   'function owner() view returns (address)',
@@ -33,6 +52,7 @@ export const CORE_ABI = [
   'function approve(address, uint256) returns (bool)',
   'function transfer(address, uint256) returns (bool)',
   'event UserRegistered(uint256 indexed leaf, uint256 index, uint256 root)',
+  ...SCREENING_ABI,
 ] as const;
 
 /** Full per-contract decoding surface (`explorer.js` ABIS). */
@@ -51,6 +71,7 @@ export const ABIS = {
     'function reserveConfigs(address) view returns (uint256 leafIndex, uint256 reserveConfig, uint256 stateRoot)',
     'function nullified(uint256) view returns (bool)',
     'function chamberId() view returns (uint256)',
+    ...SCREENING_ABI,
     'event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)',
     'event VerifierUpdated(address indexed verifier)',
     'error OwnableInvalidOwner(address owner)',
