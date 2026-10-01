@@ -16,7 +16,7 @@ export const isMist = (id: string): boolean => id.endsWith('(MIST)');
 
 type KeccakBytes = (bytes: Uint8Array) => `0x${string}`;
 /* eslint-disable @typescript-eslint/no-explicit-any */
-type Hash2 = (a: string, b: string) => string;
+type Hash2 = (a: string, b: string) => string | Promise<string>;
 
 /** MIST secret for an identity: `keccak(privateKey) >> 8` as a field string. */
 export function secretOf(id: string, privateKey: `0x${string}`, keccak256: (data: any) => `0x${string}`): string {
@@ -28,13 +28,13 @@ export function secretOf(id: string, privateKey: `0x${string}`, keccak256: (data
  * - MIST: `hash2(secret, OWNER_KEYWORD)` — the proof authorizes spends.
  * - Public: the account address as a decimal field string.
  */
-export function ownerOf(
+export async function ownerOf(
   id: string,
   opts: { secret?: string; address?: string; hash2: Hash2 },
-): string {
+): Promise<string> {
   if (isMist(id)) {
     if (opts.secret === undefined) throw new Error(`ownerOf: secret required for MIST identity ${id}`);
-    return opts.hash2(opts.secret, OWNER_KEYWORD);
+    return await opts.hash2(opts.secret, OWNER_KEYWORD);
   }
   if (opts.address === undefined) throw new Error(`ownerOf: address required for public identity ${id}`);
   return BigInt(opts.address).toString();

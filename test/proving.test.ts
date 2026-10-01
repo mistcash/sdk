@@ -92,7 +92,7 @@ describe('proving adapter', () => {
       withdraw: 0n, withdrawTo: '0', txLeaves: [], stateLeaves: [], userLeaves: [],
     });
     await expect(proveSpend({ hash2: (a) => a, spend: () => ({ status: 'error', error: 'bad' }) }, req)).rejects.toThrow('bad');
-    expect(foldCiphertext((a, b) => `${a}+${b}`, ['x', 'y', 'z'])).toBe('x+y+z');
+    expect(await foldCiphertext((a, b) => `${a}+${b}`, ['x', 'y', 'z'])).toBe('x+y+z');
   });
 
   it('rejects prover output with wrong proof length', async () => {
