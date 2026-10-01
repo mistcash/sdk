@@ -14,6 +14,28 @@ export interface Note {
   spent?: boolean;
   nullifier?: string;
   kind?: string;
+  /**
+   * Set while a deposit into a screened reserve is outside the tx tree:
+   * queued for the screener, rejected by it, or reclaimed by the depositor.
+   * Unset once approved (or never screened). Only unset notes are spendable.
+   */
+  screening?: 'pending' | 'rejected' | 'reclaimed';
+  /** Chamber deposit id of a screened deposit (`DepositQueued`). */
+  depositId?: string;
+}
+
+/** Status of a screened deposit as `pendingDeposits` reports it. */
+export type DepositStatus = 'none' | 'pending' | 'rejected';
+
+/** One entry of Chamber's `pendingDeposits` queue. */
+export interface PendingDeposit {
+  depositId: string;
+  depositor: Hex;
+  status: DepositStatus;
+  reserve: Hex;
+  asset: Hex;
+  amount: bigint;
+  noteHash: string;
 }
 
 /** Minimal receipt surfaced to callbacks. Adapters map their own receipt shape. */
@@ -21,6 +43,8 @@ export interface TxReceipt {
   transactionHash: Hex;
   gasUsed?: bigint;
   status?: string;
+  /** Raw logs; lets the client read ids the tx emitted (`DepositQueued`). */
+  logs?: Array<{ address: Hex; topics: Hex[]; data: Hex }>;
 }
 
 /** What `sendTransaction` resolves with. */
