@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { account, isMist, OWNER_KEYWORD, ownerOf, rand, secretOf } from '../src/identity.js';
+import { account, isMist, nameOf, OWNER_KEYWORD, ownerOf, rand, secretOf } from '../src/identity.js';
 
 describe('identity', () => {
   it('splits account and detects MIST', () => {
@@ -33,5 +33,27 @@ describe('identity', () => {
     expect(BigInt(a)).toBeLessThan(limit);
     expect(BigInt(b)).toBeLessThan(limit);
     expect(a).not.toBe(b);
+  });
+
+  it('rand() honours injected keccak and randomness', () => {
+    // Both are injectable so a host can supply its own CSPRNG; pinning the
+    // derivation keeps the blinding scheme from drifting silently.
+    const out = rand(
+      () => '0x100' as `0x${string}`,
+      () => new Uint8Array(32),
+    );
+    expect(out).toBe((0x100n >> 8n).toString());
+  });
+
+  it('resolves an address to its account name, case-insensitively', () => {
+    const accounts = { alice: { address: '0xAbC0000000000000000000000000000000000001' } };
+    expect(nameOf('0xAbC0000000000000000000000000000000000001', accounts)).toBe('alice');
+    // Checksums differ only in case; an exact match would miss these.
+    expect(nameOf('0xabc0000000000000000000000000000000000001', accounts)).toBe('alice');
+  });
+
+  it('falls back to the raw address when no account matches', () => {
+    const accounts = { alice: { address: '0x01' } };
+    expect(nameOf('0xdead', accounts)).toBe('0xdead');
   });
 });
