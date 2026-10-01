@@ -9,31 +9,40 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./prover": {
       "types": "./dist/prover.d.ts",
       "default": "./dist/prover.js"
     },
+    "./mist.wasm": "./wasm/mist.wasm",
+    "./circuit.json": "./circuit.json",
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "wasm",
+    "circuit.json"
   ],
   "sideEffects": ["./src/prover/wasm_exec.js", "./dist/prover/wasm_exec.js"],
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/prover.ts --format esm,cjs --dts --clean && cp src/prover-worker.js dist/",
+    "build": "tsup && cp src/prover-worker.js dist/",
     "sync:wasm": "node scripts/sync-wasm.mjs",
-    "dev": "tsup src/index.ts src/prover.ts --format esm,cjs --dts --watch",
+    "dev": "tsup --watch",
+    "prepack": "node scripts/prepack.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
