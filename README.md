@@ -128,6 +128,41 @@ const prover = createWorkerProver(); // optional: { wasmUrl: '...' }
 const client = new MistClient({ /* ... */ prover });
 ```
 
+## Screened reserves
+
+A reserve's manager can name a **screener** (core#157): deposits into that
+reserve are queued, and their notes enter the tx tree only after the
+screener approves them. The depositor can always reclaim a deposit that is
+pending or was rejected.
+
+```ts
+// Depositor
+const note = await client.deposit({ reserve, id, amount, blinding });
+note.screening; // 'pending' at a screened reserve; note.depositId is set
+await client.refreshScreening(); // later: approved notes become spendable
+await client.reclaimDeposit(note.depositId!); // pending or rejected only
+
+// Reserve manager
+await client.setReserveScreener(reserve, screenerAddress); // zero = off
+
+// Screener (KYT bot, API relayer)
+const queue = await client.queuedDeposits(reserve);
+await client.approveDeposits(ok.map((d) => d.depositId), evidenceHash);
+await client.rejectDeposits(bad.map((d) => d.depositId), evidenceHash);
+```
+
+- Notes with `screening` set (`pending`, `rejected`, `reclaimed`) are never
+  picked as spend inputs.
+- `deposit()` reads the deposit id from the `DepositQueued` log, so your
+  `sendTransaction` adapter must return `receipt.logs` (viem's receipt
+  logs as-is) for screened reserves.
+- `queuedDeposits()` needs `ChainAdapter.getEvents` for `DepositQueued`.
+- A batch reverts whole if any id is no longer pending (e.g. the depositor
+  reclaimed it), and an approval reverts with `transaction already exists`
+  on a duplicate note, so reject that id instead.
+- `evidence` is a `bytes32` commitment to your off-chain screening record
+  (e.g. `keccak256` of the KYT report).
+
 ## Caveats
 
 ### `secretOf(privateKey)` is playground-only
@@ -153,11 +188,12 @@ procedure.
 - **`identity`**: `secretOf`, `ownerOf`, `rand` — pure, injected hash
 - **`contracts`**: `CORE_ABI`, `ABIS`, `PUBLIC_INPUTS`, `AddressBook`
 - **`pq`**: X-Wing key exchange (`managerKeys`, `encapsulate`, `deriveUkx`)
-- **`notes`**: `unspent`, `pick`, `plan` — pure selection logic
+- **`notes`**: `unspent`, `pick`, `plan` — pure selection logic (skips
+  screened deposits outside the tree)
 - **`proving`**: `buildSpendRequest`, `serializeSpendRequest`, `proveSpend`,
   `ProverAdapter`, `pickUnusedKeyIndex`
 - **`client`**: `MistClient` — stateful gateway (deposit, spend, join,
-  openPayload)
+  openPayload, deposit screening)
 - **`prover`** (subpath): `loadProver`, `createWorkerProver`
 
 ## License
