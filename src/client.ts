@@ -203,6 +203,58 @@ export class MistClient {
     return receipt;
   }
 
+  /** Name (or clear, with the zero address) a reserve's screener. Manager only. */
+  async setReserveScreener(reserve: Hex, screener: Hex): Promise<TxReceipt> {
+    const { receipt } = await this.write(
+      this.book.chamber,
+      encodeFunctionData({ abi: SCREENING, functionName: 'setReserveScreener', args: [reserve, screener] }),
+      'setReserveScreener',
+    );
+    return receipt;
+  }
+
+  /**
+   * Deposits still waiting on a screener (pending only), oldest first, from
+   * `DepositQueued` events checked against the live queue. Needs
+   * `ChainAdapter.getEvents`.
+   */
+  async queuedDeposits(reserve?: Hex, fromBlock = 0n): Promise<PendingDeposit[]> {
+    if (!this.chain.getEvents) throw new Error('MistClient: queuedDeposits needs ChainAdapter.getEvents');
+    const events = await this.chain.getEvents(this.book.chamber, 'DepositQueued', fromBlock);
+    const ids = events
+      .filter((e) => !reserve || String(e.args['reserve']).toLowerCase() === reserve.toLowerCase())
+      .map((e) => String(e.args['depositId']));
+    const live = await Promise.all(ids.map((id) => this.pendingDeposit(id)));
+    return live.filter((d) => d.status === 'pending');
+  }
+
+  /**
+   * Screener: approve queued deposits into the tx tree. `evidence` is a
+   * bytes32 commitment to the off-chain screening record. The batch
+   * reverts whole on any id that is no longer pending.
+   */
+  async approveDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
+    return this.decide('approveDeposits', depositIds, evidence);
+  }
+
+  /** Screener: reject queued deposits (final; depositors can reclaim). */
+  async rejectDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
+    return this.decide('rejectDeposits', depositIds, evidence);
+  }
+
+  private async decide(
+    functionName: 'approveDeposits' | 'rejectDeposits',
+    depositIds: Array<string | bigint>,
+    evidence: Hex,
+  ): Promise<TxReceipt> {
+    const { receipt } = await this.write(
+      this.book.chamber,
+      encodeFunctionData({ abi: SCREENING, functionName, args: [depositIds.map(BigInt), evidence] }),
+      functionName,
+    );
+    return receipt;
+  }
+
   /** The `DepositQueued` the Chamber emitted in `receipt`, if any. */
   private queuedFrom(receipt: TxReceipt): { depositId: string; noteHash: string } | undefined {
     for (const log of receipt.logs ?? []) {

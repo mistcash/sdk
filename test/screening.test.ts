@@ -129,4 +129,39 @@ describe('deposit screening', () => {
     expect(decodeFunctionData({ abi: SCREENING, data: last.data })).toEqual({ functionName: 'reclaimDeposit', args: [7n] });
     expect(note.screening).toBe('reclaimed');
   });
+
+  it('sets a reserve screener', async () => {
+    const env = screenedChain();
+    await client(env.chain).setReserveScreener(BOOK.reserve, SCREENER);
+    expect(decodeFunctionData({ abi: SCREENING, data: env.sent[0].data })).toEqual({
+      functionName: 'setReserveScreener', args: [BOOK.reserve, SCREENER],
+    });
+  });
+
+  it('lists only live queued deposits for a reserve', async () => {
+    const env = screenedChain({ queue: { '1': 1, '2': 0, '3': 2, '4': 1 } });
+    const other = '0x8888888888888888888888888888888888888888';
+    const events = [
+      { args: { depositId: 1n, reserve: BOOK.reserve } },
+      { args: { depositId: 2n, reserve: BOOK.reserve } },
+      { args: { depositId: 3n, reserve: BOOK.reserve } },
+      { args: { depositId: 4n, reserve: other } },
+    ];
+    const c = client({ ...env.chain, getEvents: async (_a, name) => (name === 'DepositQueued' ? events : []) });
+    expect((await c.queuedDeposits(BOOK.reserve)).map((d) => d.depositId)).toEqual(['1']);
+    expect((await c.queuedDeposits()).map((d) => d.depositId)).toEqual(['1', '4']);
+    await expect(client(env.chain).queuedDeposits()).rejects.toThrow(/getEvents/);
+  });
+
+  it('approves and rejects batches with evidence', async () => {
+    const env = screenedChain();
+    const c = client(env.chain);
+    const evidence = `0x${'ab'.repeat(32)}` as Hex;
+    await c.approveDeposits(['1', 2n], evidence);
+    await c.rejectDeposits([3n], evidence);
+    expect(env.sent.map((tx) => decodeFunctionData({ abi: SCREENING, data: tx.data }))).toEqual([
+      { functionName: 'approveDeposits', args: [[1n, 2n], evidence] },
+      { functionName: 'rejectDeposits', args: [[3n], evidence] },
+    ]);
+  });
 });
