@@ -99,10 +99,13 @@ describe('wasm integration', () => {
     expect((res as { error?: string }).error).toMatch(/cannot unmarshal/);
   });
 
-  // Note: decrypt(ukx, ['1']) panics the Go process (index out of range) —
-  // a bug in mist.wasm. The SDK's openPayload always passes the full
-  // commitments array from a SpendSuccess, so this path is unreachable in
-  // practice. Covered when the Go code is patched.
+  it.skipIf(!hasWasm)('decrypt returns null for short commitments without crashing', () => {
+    if (!decrypt || !hash2) throw new Error('wasm not loaded');
+    expect(decrypt('5', ['1'])).toBeNull();
+    expect(decrypt('5', ['1', '2'])).toBeNull();
+    expect(decrypt('5', [])).toBeNull();
+    expect(hash2('1', '2')).toMatch(/^\d+$/);
+  });
 
   it.skipIf(hasWasm)('skips when wasm files are absent', () => {
     console.log(`Skipping wasm test: ${WASM_EXEC} or ${WASM_FILE} not found`);
