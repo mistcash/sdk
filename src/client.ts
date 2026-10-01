@@ -102,7 +102,7 @@ export class MistClient {
     return { receipt: sent.receipt, result: sent.result };
   }
 
-  private ownerFor(id: string): string {
+  private async ownerFor(id: string): Promise<string> {
     if (isMist(id)) return ownerOf(id, { secret: this.secretOf(id), hash2: this.prover.hash2 });
     return BigInt(this.addressOf(account(id))).toString();
   }
@@ -113,8 +113,8 @@ export class MistClient {
   async deposit(opts: DepositOpts): Promise<Note> {
     const { reserve, id, amount, blinding } = opts;
     if (amount <= 0n) throw new Error('Enter a whole amount above zero.');
-    const owner = this.ownerFor(id);
-    const commitment = this.prover.hash2(blinding, owner);
+    const owner = await this.ownerFor(id);
+    const commitment = await this.prover.hash2(blinding, owner);
     this.progress('Approving');
     await this.write(
       this.book.token,
@@ -141,14 +141,14 @@ export class MistClient {
     const amount = opts.amount + (opts.withdraw ?? 0n);
     if ((opts.withdraw ?? 0n) > 0n && !opts.withdrawTo) throw new Error('withdrawTo is required for withdrawals');
     const st = opts.state ?? (await this.spendState(reserve, opts.id));
-    const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember: this.isMember(reserve, opts.id), notes });
+    const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember: await this.isMember(reserve, opts.id), notes });
     if ('error' in p) throw new Error(p.error);
 
-    const owner = this.ownerFor(opts.id);
+    const owner = await this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
     const keyIndex = opts.keyIndex ?? (ukx === '0' ? randomKeyIndex() : pickUnusedKeyIndex(this.getUsedIndices(ukx)));
     const out: SpendRequest['Out'] = [
-      { id: opts.to ?? null, Owner: opts.to ? this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
+      { id: opts.to ?? null, Owner: opts.to ? await this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
       { id: opts.id, Owner: owner, Blinding: opts.blindingB ?? rand(), Amount: p.change },
     ];
     const req = buildSpendRequest({
@@ -212,7 +212,7 @@ export class MistClient {
     const { id, reserve } = opts;
     this.progress('Exchanging keys');
     const { cipherText, sharedSecret } = encapsulate(opts.managerPublicKey);
-    const mistAddr = this.ownerFor(id);
+    const mistAddr = await this.ownerFor(id);
     const ukx = deriveUkx(sharedSecret, reserve, mistAddr);
     const { ukx: managerUkx, signature } = opts.managerSide({ cipherText, reserve, mistAddr });
     if (ukx !== managerUkx) throw new Error('Client and manager derived different ukx values');
@@ -229,10 +229,10 @@ export class MistClient {
    * Try each member key exchange on a payload until one opens it (manager side).
    * Mirrors `app.js openPayload`.
    */
-  openPayload(opts: { reserve: Hex; commitments: string[] }): { owner: string; keyIndex: number; plaintext: string[] } | null {
+  async openPayload(opts: { reserve: Hex; commitments: string[] }): Promise<{ owner: string; keyIndex: number; plaintext: string[] } | null> {
     if (!this.prover.decrypt) throw new Error('Prover predates decrypt: rebuild mist.wasm.');
     for (const [key, ukx] of Object.entries(this.ukx).filter(([k]) => k.startsWith(`${opts.reserve}:`))) {
-      const hit = this.prover.decrypt(ukx, opts.commitments);
+      const hit = await this.prover.decrypt(ukx, opts.commitments);
       if (hit) return { owner: key.split(':')[1], keyIndex: hit.keyIndex, plaintext: hit.plaintext };
     }
     return null;
@@ -274,9 +274,9 @@ export class MistClient {
 
   // ── State helpers ────────────────────────────────────────────────────────
 
-  isMember(reserve: Hex, id: string): boolean {
+  async isMember(reserve: Hex, id: string): Promise<boolean> {
     try {
-      return this.ukx[`${reserve}:${this.ownerFor(id)}`] !== undefined;
+      return this.ukx[`${reserve}:${await this.ownerFor(id)}`] !== undefined;
     } catch {
       return false;
     }
@@ -343,7 +343,7 @@ export class MistClient {
       this.chain.readContract(reserve, 'registeredUsersCount'),
     ]);
     const userLeaves = await this.chain.getEvents?.(reserve, 'UserRegistered', 0n).then((evts) => evts.map((e) => String(e.args['leaf']))) ?? [];
-    const owner = (() => { try { return this.ownerFor(id); } catch { return '0'; } })();
+    const owner = await this.ownerFor(id).catch(() => '0');
     return {
       txLeaves: (txLeaves as bigint[]).map(String),
       stateLeaves,

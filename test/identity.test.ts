@@ -14,16 +14,16 @@ describe('identity', () => {
     expect(OWNER_KEYWORD).toBe('0x6f776e6572');
   });
 
-  it('derives MIST vs public owners', () => {
+  it('derives MIST vs public owners', async () => {
     const hash2 = (a: string, b: string) => `h2(${a},${b})`;
-    expect(ownerOf('alice (MIST)', { secret: 's', hash2 })).toBe(`h2(s,${OWNER_KEYWORD})`);
-    expect(ownerOf('alice', { address: '0x10', hash2 })).toBe(BigInt('0x10').toString());
+    expect(await ownerOf('alice (MIST)', { secret: 's', hash2 })).toBe(`h2(s,${OWNER_KEYWORD})`);
+    expect(await ownerOf('alice', { address: '0x10', hash2 })).toBe(BigInt('0x10').toString());
   });
 
-  it('rejects missing inputs', () => {
+  it('rejects missing inputs', async () => {
     const hash2 = (a: string) => a;
-    expect(() => ownerOf('alice (MIST)', { hash2 })).toThrow(/secret required/);
-    expect(() => ownerOf('alice', { hash2 })).toThrow(/address required/);
+    await expect(ownerOf('alice (MIST)', { hash2 })).rejects.toThrow(/secret required/);
+    await expect(ownerOf('alice', { hash2 })).rejects.toThrow(/address required/);
   });
 
   it('rand() returns a field element below 2^248 and differs between calls', () => {
