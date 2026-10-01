@@ -123,4 +123,26 @@ describe('MistClient', () => {
     expect(seen).toEqual([BOOK.chamber]);
     expect(client.notes.filter((x) => !x.spent)).toHaveLength(2);
   });
+
+  it('allows 300 spends at a reserve without members (ukx=0)', async () => {
+    const client = new MistClient({
+      book: BOOK,
+      chainId: 31337,
+      chain: mockChain([]),
+      prover,
+      secretOf: () => 's',
+      addressOf: () => '0x6666666666666666666666666666666666666666' as Hex,
+    });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100000n }];
+    for (let i = 0; i < 300; i++) {
+      await client.spend({
+        id: 'alice',
+        amount: 1n,
+        reserve: BOOK.reserve,
+        blindingA: '2',
+        blindingB: '3',
+        state: { txLeaves: [], stateLeaves: [], userLeaves: [], reserveConfig: '7', reserveUsers: 0n, ukx: '0' },
+      });
+    }
+  });
 });
