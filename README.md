@@ -3,18 +3,6 @@
 Modular TypeScript SDK for MIST private payments on EVM.
 
 Extracted from `core-deploy/playground` (`chain.js`, `pq.js`, `app.js` flows).
-Designed after `open-agent-26/sdk` (`MISTActions` + `ChainAdapter` callbacks).
-
-## Design
-
-- **Modular**: `identity`, `contracts`, `pq`, `notes`, `proving`, `client` — import only what you need.
-- **Flexible transport**: the SDK never owns a wallet. You inject a `ChainAdapter`
-  (`readContract`, `getEvents`, `sendTransaction`, `getBlock`, ...) backed by viem,
-  ethers, a test mock, or anything else.
-- **Pluggable prover**: the Groth16/WASM prover is a `ProverAdapter` callback
-  (`spend`, `decrypt`). No 12MB wasm bundled; bring your own `mist.wasm` loader.
-- **Observable**: `MistCallbacks` (`onProgress`, `onTxSent`, `onTxConfirmed`, ...) let
-  hosts wire UI, logging, or relayer routing without forking.
 
 ## Install
 
@@ -22,22 +10,156 @@ Designed after `open-agent-26/sdk` (`MISTActions` + `ChainAdapter` callbacks).
 npm install @mistcash/sdk viem
 ```
 
-## Usage
+Contributors: after cloning, sync the prover artifacts from core-deploy:
 
-```ts
-import { createPublicClient, createWalletClient, http } from 'viem';
-import { MistClient, viemChainAdapter, browserProver } from '@mistcash/sdk';
-
-const client = new MistClient({
-  chamber: '0x9fE4...',
-  token: '0xCf7E...',
-  chain: viemChainAdapter({ publicClient, walletClient, account }),
-  prover: browserProver({ spend, decrypt, hash2 }),
-  callbacks: { onProgress: (stage) => console.log(stage) },
-});
-
-await client.deposit({ who: 'alice', reserve, ownerCommitment, amount });
-await client.spend({ id: 'alice (MIST)', to: 'bob (MIST)', amount: '400' });
+```bash
+npm run sync:wasm    # copies mist.wasm + wasm_exec.js, writes circuit.json
+npm test             # verify
 ```
 
-See `src/` for module docs.
+## Quick start (Node)
+
+```ts
+import { createPublicClient, createWalletClient, http, parseAbi, keccak256 } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { anvil } from 'viem/chains';
+import { loadProver } from '@mistcash/sdk/prover';
+import { MistClient, type ChainAdapter, type Hex } from '@mistcash/sdk';
+
+const account = privateKeyToAccount('0x...');
+const publicClient = createPublicClient({ chain: anvil, transport: http() });
+const walletClient = createWalletClient({ chain: anvil, transport: http(), account });
+
+const CORE_ABI = parseAbi([
+  'function getTxArray() view returns (uint256[])',
+  'function reserveConfigs(address) view returns (uint256, uint256, uint256)',
+  'function registeredUsersCount(address) view returns (uint256)',
+  'function deposit(address, uint256, uint256, address) returns (uint256)',
+  'function handleZkp(uint256[8], uint256[14], uint256[])',
+  'event UserRegistered(uint256 indexed leaf, uint256 index, uint256 root)',
+]);
+
+const chain: ChainAdapter = {
+  readContract: (address, fn, args) =>
+    publicClient.readContract({ address, abi: CORE_ABI, functionName: fn as never, args: args as never }),
+  sendTransaction: async (tx) => {
+    const hash = await walletClient.sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const tx2 = await publicClient.getTransaction({ hash });
+    return { receipt: { transactionHash: hash, gasUsed: receipt.gasUsed }, result: null };
+  },
+  getEvents: (address, eventName, fromBlock) =>
+    publicClient.getLogs({ address, event: CORE_ABI.find((a) => a.type === 'event' && a.name === eventName) as never, fromBlock }),
+};
+
+const prover = await loadProver(); // loads wasm/mist.wasm (Node: reads from disk)
+const client = new MistClient({
+  book: { chamber: '0x...', registrar: '0x...', reserve: '0x...', token: '0x...', verifier: '0x...' },
+  chainId: anvil.id,
+  chain,
+  prover,
+  secretOf: (id) => (BigInt(keccak256(account.privateKey)) >> 8n).toString(),
+  addressOf: () => account.address,
+});
+```
+
+## Vite
+
+Vite's dev-server pre-bundling breaks `new URL('./x.wasm', import.meta.url)`
+inside dependencies. Either exclude the SDK from pre-bundling:
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  optimizeDeps: { exclude: ['@mistcash/sdk'] },
+});
+```
+
+Or pass the wasm URL explicitly:
+
+```ts
+import wasmUrl from '@mistcash/sdk/mist.wasm?url';
+const prover = await loadProver(wasmUrl);
+```
+
+## webpack 5 / Next.js
+
+Load the prover in a client component effect:
+
+```tsx
+'use client';
+import { useEffect, useState } from 'react';
+import { loadProver } from '@mistcash/sdk/prover';
+import type { FullProverAdapter } from '@mistcash/sdk/prover';
+
+export function ProverProvider({ children }: { children: React.ReactNode }) {
+  const [prover, setProver] = useState<FullProverAdapter | null>(null);
+  useEffect(() => { loadProver().then(setProver); }, []);
+  if (!prover) return <div>Loading prover…</div>;
+  return <ProverContext.Provider value={prover}>{children}</ProverContext.Provider>;
+}
+```
+
+## React hook
+
+```tsx
+import { useContext, createContext } from 'react';
+import type { FullProverAdapter } from '@mistcash/sdk/prover';
+
+const ProverContext = createContext<FullProverAdapter | null>(null);
+
+function useMistProver(): FullProverAdapter {
+  const prover = useContext(ProverContext);
+  if (!prover) throw new Error('useMistProver must be inside ProverProvider');
+  return prover;
+}
+```
+
+## Web Worker proving
+
+Proving blocks the main thread for seconds. Use `createWorkerProver` to run
+it in a Web Worker (browser only):
+
+```ts
+import { createWorkerProver } from '@mistcash/sdk/prover';
+
+const prover = createWorkerProver(); // optional: { wasmUrl: '...' }
+// prover.hash2, spend, decrypt are now async (proxied over postMessage)
+const client = new MistClient({ /* ... */ prover });
+```
+
+## Caveats
+
+### `secretOf(privateKey)` is playground-only
+
+Browser wallets never expose a private key. Real apps should derive the
+MIST secret from a wallet signature (EIP-712 or `personal_sign`), not from
+`keccak(privateKey) >> 8`. The SDK's `secretOf` is a convenience for
+testing.
+
+### uint64 amount limit
+
+The prover's `SpendNote.Amount` is `uint64`. At 18 decimals, a single note
+is capped at ~18.4 tokens. Larger amounts require splitting across notes.
+
+### Circuit sync
+
+The SDK mirrors types, ABIs, and hash rules from `core`/`core-deploy`. See
+[CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full surface and update
+procedure.
+
+## Architecture
+
+- **`identity`**: `secretOf`, `ownerOf`, `rand` — pure, injected hash
+- **`contracts`**: `CORE_ABI`, `ABIS`, `PUBLIC_INPUTS`, `AddressBook`
+- **`pq`**: X-Wing key exchange (`managerKeys`, `encapsulate`, `deriveUkx`)
+- **`notes`**: `unspent`, `pick`, `plan` — pure selection logic
+- **`proving`**: `buildSpendRequest`, `serializeSpendRequest`, `proveSpend`,
+  `ProverAdapter`, `pickUnusedKeyIndex`
+- **`client`**: `MistClient` — stateful gateway (deposit, spend, join,
+  openPayload)
+- **`prover`** (subpath): `loadProver`, `createWorkerProver`
+
+## License
+
+MIT
