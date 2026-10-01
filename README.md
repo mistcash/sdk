@@ -165,6 +165,10 @@ import { createWorkerProver } from '@mistcash/sdk/prover';
 const prover = createWorkerProver(); // optional: { wasmUrl: '...' }
 // prover.hash2, spend, decrypt are now async (proxied over postMessage)
 const client = new MistClient({ /* ... */ prover });
+
+// The worker holds the 16MB proving key, so stop it when you are done with it.
+// This also rejects any call still in flight.
+prover.terminate();
 ```
 
 ## Caveats
@@ -222,7 +226,9 @@ and the manual steps for ABIs and public inputs.
   `ProverAdapter`, `pickUnusedKeyIndex`
 - **`client`**: `MistClient` — stateful gateway (deposit, spend, join,
   openPayload)
-- **`prover`** (subpath): `loadProver`, `createWorkerProver`
+- **`prover`** (subpath): `loadProver`, `createWorkerProver` (returns
+  `terminate()`; without it the worker and its 16MB key live for the page's
+  lifetime)
 
 ## License
 
