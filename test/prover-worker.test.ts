@@ -295,3 +295,20 @@ describe('worker round trip', () => {
     expect(workerInstance?.terminated).toBe(true);
   });
 });
+
+// Known bug, reproduced: fails until fixed.
+describe('worker lifecycle: known bugs', () => {
+  it('rejects a call made after terminate() instead of hanging', async () => {
+    const { host, restore: r } = await setup();
+    restore = r;
+    const prover = host.createWorkerProver();
+    prover.terminate();
+
+    const outcome = await Promise.race([
+      prover.hash2('1', '2').then(() => 'resolved', () => 'rejected'),
+      new Promise((res) => setTimeout(() => res('pending after 500ms'), 500)),
+    ]);
+
+    expect(outcome).toBe('rejected');
+  });
+});
