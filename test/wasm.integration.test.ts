@@ -1,14 +1,8 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
 import { buildSpendRequest, serializeSpendRequest, type SpendResult } from '../src/proving.js';
-
-const WASM_DIR = process.env.MIST_WASM_DIR ?? resolve(import.meta.dirname, '../.fixtures');
-const WASM_EXEC = resolve(WASM_DIR, 'wasm_exec.js');
-const WASM_FILE = resolve(WASM_DIR, 'mist.wasm');
-
-const hasWasm = existsSync(WASM_EXEC) && existsSync(WASM_FILE);
+import { WASM_FILE, WASM_EXEC, hasWasm, missingWasm, SYNC_HINT } from './helpers/artifacts.js';
 
 type SpendFn = (json: string) => SpendResult;
 type HashFn = (a: string, b: string) => string;
@@ -108,6 +102,6 @@ describe('wasm integration', () => {
   });
 
   it.skipIf(hasWasm)('skips when wasm files are absent', () => {
-    console.log(`Skipping wasm test: ${WASM_EXEC} or ${WASM_FILE} not found`);
+    console.log(`Skipping wasm test: ${missingWasm}. ${SYNC_HINT}`);
   });
 });

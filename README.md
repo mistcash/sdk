@@ -63,6 +63,45 @@ const client = new MistClient({
 });
 ```
 
+## Loading `mist.wasm`
+
+`mist.wasm` is a ~16 MB proving key. `loadProver()` takes it from four
+kinds of source, and **which one you should pass is the only bundler-specific
+decision in this SDK**:
+
+| Source | Signature | Use when |
+| --- | --- | --- |
+| nothing | `loadProver()` | Node, and browsers where the package's own file layout is served verbatim |
+| a path | `loadProver('/abs/path/mist.wasm')` | Node, custom build output |
+| a URL | `loadProver(url)` | browsers, when your bundler emits the asset |
+| bytes | `loadProver(uint8)` | anywhere; also the way to load from OPFS/IndexedDB |
+
+The bare `loadProver()` default resolves `new URL('../wasm/mist.wasm',
+import.meta.url)` **at runtime**. That string is invisible to your bundler, so
+in a built app it usually 404s — the asset was never emitted. Whenever you
+bundle, pass the URL or the bytes explicitly:
+
+```ts
+// Vite
+import wasmUrl from '@mistcash/sdk/wasm/mist.wasm?url';
+await loadProver(wasmUrl);
+
+// webpack 5 / Next.js — a static import of the asset gives you a hashed URL
+import wasmUrl from '@mistcash/sdk/wasm/mist.wasm';
+await loadProver(wasmUrl);
+```
+
+If loading fails, the error names the path it tried and tells you to pass a
+source, so a 404 reads as a 404 rather than a stack trace from inside the
+loader.
+
+Deliberately **not** supported: inlining the wasm as a base64 string in the
+JavaScript. It would add ~22 MB to every consumer's bundle, couple the wasm's
+cache lifetime to the JS bundle's (a circuit change would invalidate all of
+it), and force a full decode in memory instead of `instantiateStreaming`. If
+you need a self-contained bundle anyway, base64 it yourself and hand the
+decoded bytes to `loadProver`.
+
 ## Vite
 
 Vite's dev-server pre-bundling breaks `new URL('./x.wasm', import.meta.url)`
@@ -126,6 +165,10 @@ import { createWorkerProver } from '@mistcash/sdk/prover';
 const prover = createWorkerProver(); // optional: { wasmUrl: '...' }
 // prover.hash2, spend, decrypt are now async (proxied over postMessage)
 const client = new MistClient({ /* ... */ prover });
+
+// The worker holds the 16MB proving key, so stop it when you are done with it.
+// This also rejects any call still in flight.
+prover.terminate();
 ```
 
 ## Screened reserves
@@ -172,6 +215,40 @@ MIST secret from a wallet signature (EIP-712 or `personal_sign`), not from
 `keccak(privateKey) >> 8`. The SDK's `secretOf` is a convenience for
 testing.
 
+### One global Go runtime
+
+The Go runtime registers itself as `globalThis.Go`, and the prover's exports
+land on `globalThis` too. Two provers from different `mist.wasm` versions in
+one page would collide, so load exactly one per page. `loadProver()` memoizes
+a single instance per module for this reason, and clears the memo if loading
+fails so a retry can succeed.
+
+### Server-side rendering
+
+`import { MistClient } from '@mistcash/sdk'` is SSR-safe: the root entry
+pulls in no wasm and no Go runtime, and the runtime is loaded lazily only if
+you call `loadProver`. Import `@mistcash/sdk/prover` from client code only —
+the `node` export condition is what keeps `node:fs` out of browser bundles.
+
+### Restore key indices at startup
+
+Chamber rejects a spend whose private-tx key has been used before, and that key
+is `H(userKeyExchange, keyIndex)`. The SDK draws `keyIndex` from a CSPRNG
+restricted to indices not already used for that exchange, but it only knows
+about indices it has seen this session.
+
+If you pass a `StorageAdapter`, **call `restoreKeyIndices()` once at startup**:
+
+```ts
+const client = new MistClient({ /* ... */ store: localStorageAdapter });
+await client.restoreKeyIndices();
+```
+
+Skip it and every session starts with an empty set, so a reload can redraw an
+index that was already spent and the spend will revert on-chain. Indices are
+merged into the store rather than overwriting it, so two clients sharing one
+adapter — two tabs, for instance — do not erase each other's.
+
 ### uint64 amount limit
 
 The prover's `SpendNote.Amount` is `uint64`. At 18 decimals, a single note
@@ -179,9 +256,19 @@ is capped at ~18.4 tokens. Larger amounts require splitting across notes.
 
 ### Circuit sync
 
-The SDK mirrors types, ABIs, and hash rules from `core`/`core-deploy`. See
-[CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full surface and update
-procedure.
+The SDK mirrors types, ABIs, and hash rules from `core`/`core-deploy`. After a
+circuit or contract change, one command vendors the new proving key and runs
+the real-wasm tests against it:
+
+```sh
+MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm && npm test
+```
+
+It copies `mist.wasm` and `wasm_exec.js`, writes `circuit.json` (sha256, size,
+Go version, and the `core` submodule commit the key was built from), and
+`prepack` refuses to pack a wasm whose checksum or circuit commit does not
+match. See [CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full mirrored surface
+and the manual steps for ABIs and public inputs.
 
 ## Architecture
 
@@ -194,7 +281,9 @@ procedure.
   `ProverAdapter`, `pickUnusedKeyIndex`
 - **`client`**: `MistClient` — stateful gateway (deposit, spend, join,
   openPayload, deposit screening)
-- **`prover`** (subpath): `loadProver`, `createWorkerProver`
+- **`prover`** (subpath): `loadProver`, `createWorkerProver` (returns
+  `terminate()`; without it the worker and its 16MB key live for the page's
+  lifetime)
 
 ## License
 

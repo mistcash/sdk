@@ -8,6 +8,9 @@ dist
 wasm
 coverage
 
+# Prover artifacts staged by hand for MIST_WASM_DIR runs
+.fixtures
+
 # Local env files
 .env
 .env.local

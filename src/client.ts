@@ -12,6 +12,9 @@ import { deriveUkx, encapsulate } from './pq.js';
 import { SCREENING_ABI, type AddressBook } from './contracts.js';
 import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDeposit, StorageAdapter, TxReceipt } from './types.js';
 
+/** Single store key holding the per-ukx used key-index map. */
+const KEY_INDICES_KEY = 'mist:keyIndices';
+
 export interface MistClientOpts {
   book: AddressBook;
   chainId: number | string;
@@ -74,6 +77,8 @@ export class MistClient {
   ukx: Record<string, string> = {};
   /** Used key indices per ukx, for CSPRNG selection. */
   usedKeyIndices: Map<string, Set<number>> = new Map();
+  /** Serialises persistKeyIndices so a read-merge-write cannot interleave. */
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(opts: MistClientOpts) {
     this.book = opts.book;
@@ -323,7 +328,16 @@ export class MistClient {
       }),
       'handleZkp',
     );
-    if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) this.recordUsedIndex(ukx, keyIndex);
+    // `commitments` is the load-bearing half of this guard, so it is worth stating
+// why. The prover returns them only when the sender is a registered member
+// (`if userLeaf != nil` in core-deploy/builders/wasm/main.go), and the private
+// tx key Chamber files the spend under is that array's first element — derived
+// from `UserEncryptionKey(ukx, KeyIndex)`. No member, no commitments, no
+// private tx key, so nothing to remember. The circuit pins AuditorCommitments
+// to 0 when the reserve has no users, which is why the prover cannot return a
+// non-empty set for an unregistered sender. Gating on `ukx !== '0'` alone
+// would over-record, not under-record.
+if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedIndex(ukx, keyIndex);
     p.notes.forEach((nn, i) => Object.assign(nn, { spent: true, nullifier: res.publicInputs[i] }));
     out.forEach((o, i) => {
       if (o.Amount > 0n && o.id) {
@@ -427,7 +441,15 @@ export class MistClient {
     return total(notes.filter((x) => !x.spent));
   }
 
-  /** Get used key indices for a ukx, loading from store if available. */
+  /**
+   * Get used key indices for a ukx.
+   *
+   * In-memory only. This does not read the store: loading is an explicit
+   * `restoreKeyIndices()` call because `store.get` may be async and the caller
+   * needs the set synchronously to draw an index. A host that never calls
+   * `restoreKeyIndices()` starts every session with an empty set, which is
+   * exactly how a duplicate private-tx key gets drawn and rejected by Chamber.
+   */
   private getUsedIndices(ukx: string): Set<number> {
     let used = this.usedKeyIndices.get(ukx);
     if (!used) {
@@ -438,24 +460,43 @@ export class MistClient {
   }
 
   /** Record a used key index after successful submit and persist. */
-  private recordUsedIndex(ukx: string, keyIndex: number): void {
+  async recordUsedIndex(ukx: string, keyIndex: number): Promise<void> {
     this.getUsedIndices(ukx).add(keyIndex);
-    this.persistKeyIndices();
+    await this.persistKeyIndices();
   }
 
-  private persistKeyIndices(): void {
-    if (!this.store) return;
-    const obj: Record<string, number[]> = {};
-    for (const [ukx, used] of this.usedKeyIndices) {
-      if (used.size > 0) obj[ukx] = [...used];
-    }
-    this.store.set('mist:keyIndices', JSON.stringify(obj));
+  /**
+   * Merge this client's used indices into the store.
+   *
+   * Read-merge-write rather than a blind overwrite: the whole map lives under
+   * one key, so two clients (or two browser tabs) sharing a StorageAdapter
+   * would otherwise erase each other's indices on every spend. Losing an index
+   * means the same private-tx key can be drawn twice, and Chamber rejects a
+   * reused one. Writes are chained so two concurrent persists cannot interleave
+   * a read and a write around each other.
+   */
+  private persistKeyIndices(): Promise<void> {
+    const store = this.store;
+    if (!store) return Promise.resolve();
+    this.persistQueue = this.persistQueue.then(async () => {
+      const raw = await store.get(KEY_INDICES_KEY);
+      const merged: Record<string, number[]> = raw ? JSON.parse(raw) : {};
+      for (const [ukx, used] of this.usedKeyIndices) {
+        if (used.size === 0) continue;
+        merged[ukx] = [...new Set([...(merged[ukx] ?? []), ...used])];
+      }
+      await store.set(KEY_INDICES_KEY, JSON.stringify(merged));
+    }).catch(() => {
+      // A store that throws must not fail an otherwise successful spend; the
+      // in-memory set still guards this session.
+    });
+    return this.persistQueue;
   }
 
-  /** Restore used key indices from store (call after construction). */
+  /** Restore used key indices from store. Call once after construction. */
   async restoreKeyIndices(): Promise<void> {
     if (!this.store) return;
-    const raw = await this.store.get('mist:keyIndices');
+    const raw = await this.store.get(KEY_INDICES_KEY);
     if (!raw) return;
     const obj = JSON.parse(raw) as Record<string, number[]>;
     for (const [ukx, indices] of Object.entries(obj)) {

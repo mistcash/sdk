@@ -25,6 +25,12 @@ then `handleZkp` reverts on-chain.
 
 ## When the circuit or contracts change
 
+Steps 1 and 5 are scripted. Steps 2–4 are **not**: the ABI literals in
+`src/contracts.ts` and the `*_MIN` ABIs in `src/client.ts` are hand-maintained,
+and `PUBLIC_INPUTS` is positional. A contract change therefore still needs a
+human to read the diff and edit them; `sync:wasm` will not notice that the
+ABIs went stale.
+
 1. **Rebuild in core-deploy** (with the `core` submodule at the new commit):
    `scripts/build.sh`. A circuit change produces new keys, a new
    `ChamberVerifier.sol`, and a new `dist/mist.wasm`.
@@ -41,27 +47,30 @@ then `handleZkp` reverts on-chain.
    and in every `publicInputs[i]` index in `src/client.ts` (nullifiers
    `[0..1]`, new notes `[2..3]`).
 4. **Regenerate the ABIs** from `forge inspect` rather than editing by hand.
-5. **Refresh the prover artifacts** using the sync script:
+5. **Refresh the prover artifacts and run the real-wasm tests** with one command:
 
    ```sh
-   MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm
+   MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm && npm test
    ```
 
-   This copies `mist.wasm` and `wasm_exec.js`, and writes `circuit.json`
-   with the sha256, byte size, Go version, core-deploy commit, and
-   timestamp. Verify the values, then commit `src/prover/wasm_exec.js`
-   and `circuit.json`.
-6. **Run the real-wasm test** (Node, no mocks):
+   This copies `mist.wasm` to `wasm/` and `wasm_exec.js` to `src/prover/`, then
+   writes `circuit.json` with the sha256, byte size, Go version, the `core`
+   submodule commit the key was built from, and a timestamp. The tests read
+   those same two vendored paths, so the six real-wasm tests actually run
+   rather than skipping. Check the printed commits, then commit
+   `src/prover/wasm_exec.js` and `circuit.json`.
+
+   `npm run verify` additionally typechecks, builds, and runs the packaging
+   tests that assert the built `dist/` tree and the `exports` map.
+6. **Then prove it end to end**, because the wasm tests only prove the request
+   reaches the circuit:
 
    ```sh
-   npm test    # wasm integration test runs in the default suite
+   core-deploy/scripts/deploy.sh flow
    ```
 
-   It builds a request with `buildSpendRequest`, proves it with the real
-   `mist.wasm`, and asserts the error is not a parse/unmarshal failure
-   (reaches the circuit). Then run `core-deploy/scripts/deploy.sh flow`
-   and an SDK spend against anvil, once at a reserve with members and
-   once at a reserve without.
+   and an SDK spend against anvil, once at a reserve with members and once at
+   a reserve without.
 7. **Version it**: a new vk means old proofs fail against the new verifier,
    and new proofs fail against the old one. Treat that as a breaking release
    (a minor bump while on 0.x), and note in the changelog which deployments,

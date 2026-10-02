@@ -28,3 +28,14 @@ if (actual !== circuit.sha256) {
 }
 
 console.log('prepack: wasm/mist.wasm OK');
+
+// A published wasm has to say which circuits it was built from: a proving key
+// is only valid against the verifier for that exact circuit, so "unknown" here
+// means nobody can tell what a consumer is trusting.
+if (!circuit.core || circuit.core.commit === 'unknown') {
+  console.error('prepack: circuit.json does not record the `core` commit');
+  console.error('  a shipped proving key must state the circuits it came from');
+  console.error('  re-run: MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm');
+  process.exit(1);
+}
+console.log(`prepack: circuits ${circuit.core.repo}@${circuit.core.commit.slice(0, 12)}`);

@@ -2,6 +2,13 @@
   "sha256": "098c6e60da66ff0e82707baba8d6612cdc55be4acdeed88ff90177b5c04e9fb7",
   "size": 16375967,
   "go": "go1.26.4",
-  "coreDeployCommit": "2b10af1",
-  "timestamp": "2026-10-01T18:37:02.723Z"
+  "core": {
+    "repo": "core",
+    "commit": "aecc095d0efedded5264e6238a6f71078afe9de5"
+  },
+  "builtFrom": {
+    "repo": "mist",
+    "commit": "44098b548177ceed55907b1fa2bd6a2b4d18d3c6"
+  },
+  "timestamp": "2026-10-01T21:30:25.436Z"
 }

@@ -11,7 +11,22 @@ export const loadProver = createLoader(async (go, source) => {
     return instantiateFromResponse(source, go);
   }
   const url = source !== undefined ? String(source) : new URL('../wasm/mist.wasm', import.meta.url).href;
-  const res = await fetch(url);
+  const res = await fetch(url).catch((cause: unknown) => {
+    throw new Error(
+      `could not fetch mist.wasm from ${url}: ${(cause as Error)?.message ?? String(cause)}. ` +
+      'If this is a bundled app, the default path is resolved at runtime and the asset may not ' +
+      'have been emitted — pass the URL your bundler gives you instead, e.g. ' +
+      "loadProver(new URL('@mistcash/sdk/wasm/mist.wasm', import.meta.url)) or, on Vite, " +
+      "loadProver((await import('@mistcash/sdk/wasm/mist.wasm?url')).default).",
+      { cause },
+    );
+  });
+  if (!res.ok) {
+    throw new Error(
+      `mist.wasm not served at ${url} (HTTP ${res.status}${(res.statusText ? ' ' + res.statusText : '')}). ` +
+      'Pass the wasm URL your bundler emits, or the bytes themselves, to loadProver().',
+    );
+  }
   return instantiateFromResponse(res, go);
 });
 
@@ -36,6 +51,9 @@ export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
   hash3: (a: string, b: string, c: string) => Promise<string>;
   spend: (json: string) => Promise<SpendResult>;
   decrypt: (ukx: string, commitments: string[]) => Promise<{ keyIndex: number; plaintext: string[] } | null>;
+  /** Stop the worker and reject anything still in flight. Without this the
+   * worker (and its 16MB wasm) stays alive for the page's lifetime. */
+  terminate: () => void;
 } {
   const worker = new Worker(new URL('./prover-worker.js', import.meta.url), { type: 'module' });
   const resolvedWasmUrl = opts?.wasmUrl !== undefined
@@ -67,5 +85,12 @@ export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
     spend: (json: string) => call<SpendResult>('spend', [json]),
     decrypt: (ukx: string, commitments: string[]) =>
       call<{ keyIndex: number; plaintext: string[] } | null>('decrypt', [ukx, commitments]),
+    terminate: () => {
+      const err = new Error('prover worker terminated');
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      worker.onmessage = null;
+      worker.terminate();
+    },
   };
 }
