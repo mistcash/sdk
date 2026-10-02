@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pick, plan, total } from '../src/notes.js';
+import { pick, plan, total, unspent } from '../src/notes.js';
 import type { Note } from '../src/types.js';
 
 const n = (amount: bigint, id = 'alice (MIST)'): Note => ({
@@ -28,6 +28,16 @@ describe('notes', () => {
     expect(gated).toMatchObject({ join: true });
     const pub = plan({ id: 'alice', amount: 40n, reserve: '0x01', reserveUsers: 0n, isMember: false, notes: [n(100n, 'alice')] });
     expect(pub).toMatchObject({ submitter: 'alice' });
+  });
+
+  it('never spends screened deposits outside the tree', () => {
+    const notes = (['pending', 'rejected', 'reclaimed'] as const).map((screening) => ({ ...n(100n), screening }));
+    expect(unspent(notes, '0x01', 'alice (MIST)')).toEqual([]);
+    expect(plan({ id: 'alice (MIST)', amount: 40n, reserve: '0x01', reserveUsers: 0n, isMember: false, notes })).toMatchObject({
+      error: 'Your notes here hold 0.',
+    });
+    const approved = { ...n(100n), depositId: '1' };
+    expect(unspent([...notes, approved], '0x01', 'alice (MIST)')).toEqual([approved]);
   });
 
   it('routes a public self-submit through the supplied account name', () => {

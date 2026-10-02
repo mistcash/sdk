@@ -5,9 +5,12 @@
 import type { Hex, Note } from './types.js';
 import { isMist } from './identity.js';
 
-/** Notes for one identity at one reserve that have not been spent. */
+/**
+ * Notes for one identity at one reserve that are in the tx tree and not yet
+ * spent. Screened deposits still awaiting approval are excluded.
+ */
 export function unspent(notes: Note[], reserve: Hex, id: string): Note[] {
-  return notes.filter((n) => !n.spent && n.reserve === reserve && n.id === id);
+  return notes.filter((n) => !n.spent && !n.screening && n.reserve === reserve && n.id === id);
 }
 
 /** Sum of note amounts. */

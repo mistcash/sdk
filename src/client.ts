@@ -4,13 +4,13 @@
 // (`MistCallbacks`) are all injected — set `sendTransaction` to route MIST
 // spends through a relayer while public spends go direct.
 
-import { encodeAbiParameters, encodeFunctionData, parseAbiParameters } from 'viem';
+import { decodeEventLog, encodeAbiParameters, encodeFunctionData, parseAbi, parseAbiParameters } from 'viem';
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, randomKeyIndex, type ProverAdapter, type SpendRequest } from './proving.js';
 import { deriveUkx, encapsulate } from './pq.js';
-import type { AddressBook } from './contracts.js';
-import type { ChainAdapter, Hex, MistCallbacks, Note, StorageAdapter, TxReceipt } from './types.js';
+import { SCREENING_ABI, type AddressBook } from './contracts.js';
+import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDeposit, StorageAdapter, TxReceipt } from './types.js';
 
 /** Single store key holding the per-ukx used key-index map. */
 const KEY_INDICES_KEY = 'mist:keyIndices';
@@ -114,12 +114,18 @@ export class MistClient {
 
   // ── Deposit ──────────────────────────────────────────────────────────────
 
-  /** Approve + deposit into a reserve vault. Returns the new local note. */
+  /**
+   * Approve + deposit into a reserve vault. Returns the new local note. At a
+   * screened reserve the note comes back `screening: 'pending'` with its
+   * `depositId`, and is spendable only after `refreshScreening` sees it
+   * approved.
+   */
   async deposit(opts: DepositOpts): Promise<Note> {
     const { reserve, id, amount, blinding } = opts;
     if (amount <= 0n) throw new Error('Enter a whole amount above zero.');
     const owner = await this.ownerFor(id);
     const commitment = await this.prover.hash2(blinding, owner);
+    const screened = await this.isScreened(reserve);
     this.progress('Approving');
     await this.write(
       this.book.token,
@@ -127,14 +133,145 @@ export class MistClient {
       'approve',
     );
     this.progress('Depositing');
-    const { result } = await this.write(
+    const { receipt, result } = await this.write(
       this.book.chamber,
       encodeFunctionData({ abi: CHAMBER_MIN, functionName: 'deposit', args: [reserve, BigInt(commitment), amount, this.book.token] }),
       'deposit',
     );
     const note: Note = { reserve, id, blinding, amount, hash: String(result ?? ''), kind: 'deposit' };
+    if (screened) {
+      const queued = this.queuedFrom(receipt);
+      if (!queued) throw new Error('MistClient: screened deposit sent, but its receipt has no DepositQueued log');
+      Object.assign(note, { hash: queued.noteHash, screening: 'pending', depositId: queued.depositId });
+    }
     this.notes.push(note);
     return note;
+  }
+
+  // ── Deposit screening ────────────────────────────────────────────────────
+
+  /**
+   * Whether deposits into `reserve` wait for its screener. False on a
+   * Chamber that predates screening (the read reverts).
+   */
+  async isScreened(reserve: Hex): Promise<boolean> {
+    try {
+      const screener = (await this.chain.readContract(this.book.chamber, 'reserveScreeners', [reserve])) as Hex;
+      return BigInt(screener ?? 0) !== 0n;
+    } catch {
+      return false;
+    }
+  }
+
+  /** One queue entry by deposit id; `status: 'none'` once settled or unknown. */
+  async pendingDeposit(depositId: string | bigint): Promise<PendingDeposit> {
+    const [depositor, status, reserve, asset, amount, noteHash] = (await this.chain.readContract(this.book.chamber, 'pendingDeposits', [
+      BigInt(depositId),
+    ])) as [Hex, number | bigint, Hex, Hex, bigint, bigint];
+    return {
+      depositId: String(depositId),
+      depositor,
+      status: DEPOSIT_STATUS[Number(status)] ?? 'none',
+      reserve,
+      asset,
+      amount: BigInt(amount),
+      noteHash: String(noteHash),
+    };
+  }
+
+  /**
+   * Re-read every local screened note: approved ones (their note is in the
+   * tx tree) become spendable, rejected ones are marked so, and pending ones
+   * that left the queue without entering the tree were reclaimed.
+   */
+  async refreshScreening(notes: Note[] = this.notes): Promise<Note[]> {
+    const open = notes.filter((x) => x.depositId && (x.screening === 'pending' || x.screening === 'rejected'));
+    if (!open.length) return [];
+    const inTree = new Set(((await this.chain.readContract(this.book.chamber, 'getTxArray')) as bigint[]).map(String));
+    for (const note of open) {
+      const { status } = await this.pendingDeposit(note.depositId!);
+      if (status !== 'none') note.screening = status;
+      else if (inTree.has(String(note.hash))) delete note.screening;
+      else note.screening = 'reclaimed';
+    }
+    return open;
+  }
+
+  /** Take back a pending or rejected deposit (depositor only). */
+  async reclaimDeposit(depositId: string | bigint): Promise<TxReceipt> {
+    const { receipt } = await this.write(
+      this.book.chamber,
+      encodeFunctionData({ abi: SCREENING, functionName: 'reclaimDeposit', args: [BigInt(depositId)] }),
+      'reclaimDeposit',
+    );
+    for (const note of this.notes) if (note.depositId === String(depositId)) note.screening = 'reclaimed';
+    return receipt;
+  }
+
+  /** Name (or clear, with the zero address) a reserve's screener. Manager only. */
+  async setReserveScreener(reserve: Hex, screener: Hex): Promise<TxReceipt> {
+    const { receipt } = await this.write(
+      this.book.chamber,
+      encodeFunctionData({ abi: SCREENING, functionName: 'setReserveScreener', args: [reserve, screener] }),
+      'setReserveScreener',
+    );
+    return receipt;
+  }
+
+  /**
+   * Deposits still waiting on a screener (pending only), oldest first, from
+   * `DepositQueued` events checked against the live queue. Needs
+   * `ChainAdapter.getEvents`.
+   */
+  async queuedDeposits(reserve?: Hex, fromBlock = 0n): Promise<PendingDeposit[]> {
+    if (!this.chain.getEvents) throw new Error('MistClient: queuedDeposits needs ChainAdapter.getEvents');
+    const events = await this.chain.getEvents(this.book.chamber, 'DepositQueued', fromBlock);
+    const ids = events
+      .filter((e) => !reserve || String(e.args['reserve']).toLowerCase() === reserve.toLowerCase())
+      .map((e) => String(e.args['depositId']));
+    const live = await Promise.all(ids.map((id) => this.pendingDeposit(id)));
+    return live.filter((d) => d.status === 'pending');
+  }
+
+  /**
+   * Screener: approve queued deposits into the tx tree. `evidence` is a
+   * bytes32 commitment to the off-chain screening record. The batch
+   * reverts whole on any id that is no longer pending.
+   */
+  async approveDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
+    return this.decide('approveDeposits', depositIds, evidence);
+  }
+
+  /** Screener: reject queued deposits (final; depositors can reclaim). */
+  async rejectDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
+    return this.decide('rejectDeposits', depositIds, evidence);
+  }
+
+  private async decide(
+    functionName: 'approveDeposits' | 'rejectDeposits',
+    depositIds: Array<string | bigint>,
+    evidence: Hex,
+  ): Promise<TxReceipt> {
+    const { receipt } = await this.write(
+      this.book.chamber,
+      encodeFunctionData({ abi: SCREENING, functionName, args: [depositIds.map(BigInt), evidence] }),
+      functionName,
+    );
+    return receipt;
+  }
+
+  /** The `DepositQueued` the Chamber emitted in `receipt`, if any. */
+  private queuedFrom(receipt: TxReceipt): { depositId: string; noteHash: string } | undefined {
+    for (const log of receipt.logs ?? []) {
+      if (log.address.toLowerCase() !== this.book.chamber.toLowerCase()) continue;
+      try {
+        const { eventName, args } = decodeEventLog({ abi: SCREENING, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
+        if (eventName === 'DepositQueued') return { depositId: String(args.depositId), noteHash: String(args.noteHash) };
+      } catch {
+        // Not a screening event.
+      }
+    }
+    return undefined;
   }
 
   // ── Spend (send / withdraw) ──────────────────────────────────────────────
@@ -405,6 +542,10 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     return leaves;
   }
 }
+
+const SCREENING = parseAbi(SCREENING_ABI);
+
+const DEPOSIT_STATUS: DepositStatus[] = ['none', 'pending', 'rejected'];
 
 // Minimal viem ABIs for the calls the client encodes (full surface in contracts.ts).
 const ERC20_MIN = [
