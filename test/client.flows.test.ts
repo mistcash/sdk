@@ -670,3 +670,60 @@ describe('MistClient flows', () => {
     expect(await client.isMember(BOOK.reserve, 'alice (MIST)')).toBe(false);
   });
 });
+
+// Known bugs, reproduced. Each asserts the correct behaviour and fails until
+// the bug is fixed.
+describe('MistClient key indices: known bugs', () => {
+  const spendWith = async (client: MistClient, ukx: string, keyIndex?: number) => {
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, keyIndex, state: fixedState({ ukx }) });
+  };
+
+  it('does not draw an index another live client already used', async () => {
+    // `restoreKeyIndices()` reads the store once, so a second tab never learns
+    // what the first spent afterwards. 255 of 256 indices are used, leaving
+    // exactly one free, so the collision is deterministic.
+    const used = Array.from({ length: 255 }, (_, i) => i);
+    const store = mockStore({ 'mist:keyIndices': JSON.stringify({ '555': used }) });
+    const a = makeClient({ prover: mockProver({ commitments: () => ['999'] }).prover, store });
+    const bProver = mockProver({ commitments: () => ['999'] });
+    const b = makeClient({ prover: bProver.prover, store });
+    await a.restoreKeyIndices();
+    await b.restoreKeyIndices();
+
+    await spendWith(a, '555');
+    expect(JSON.parse(store.data.get('mist:keyIndices') ?? '')['555']).toContain(255);
+
+    await expect(spendWith(b, '555')).rejects.toThrow(/All 256/);
+    expect(bProver.requests[0]?.KeyIndex).not.toBe(255);
+  });
+
+  it('does not lose a write when two clients persist concurrently to an async store', async () => {
+    // `persistQueue` serialises one client's writes, not two clients'.
+    const data = new Map<string, string>();
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    const store: StorageAdapter = {
+      get: async (k) => { await tick(); return data.get(k) ?? null; },
+      set: async (k, v) => { await tick(); data.set(k, v); },
+    };
+    const a = makeClient({ prover: mockProver({ commitments: () => ['999'] }).prover, store });
+    const b = makeClient({ prover: mockProver({ commitments: () => ['999'] }).prover, store });
+
+    await Promise.all([spendWith(a, '555', 3), spendWith(b, '666', 4)]);
+
+    expect(JSON.parse(data.get('mist:keyIndices') ?? '')).toEqual({ '555': [3], '666': [4] });
+  });
+
+  it('does not silently stop persisting when the stored value is corrupt', async () => {
+    // The `.catch(() => {})` in persistKeyIndices swallows the JSON.parse
+    // error, so index 7 is never saved, and the next session's
+    // restoreKeyIndices() throws on the same value.
+    const store = mockStore({ 'mist:keyIndices': '{not json' });
+    const client = makeClient({ prover: mockProver({ commitments: () => ['999'] }).prover, store });
+
+    await spendWith(client, '555', 7);
+
+    expect(store.data.get('mist:keyIndices')).not.toBe('{not json');
+    await expect(makeClient({ store }).restoreKeyIndices()).resolves.toBeUndefined();
+  });
+});

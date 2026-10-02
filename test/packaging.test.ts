@@ -138,3 +138,22 @@ describe('packaging', () => {
     );
   });
 });
+
+// Known bug, reproduced: fails until fixed. Doesn't need dist/, so it always runs.
+describe('documented import paths', () => {
+  it('only tells consumers to import subpaths the exports map exposes', () => {
+    // A Vite build of `import u from '@mistcash/sdk/wasm/mist.wasm?url'` fails
+    // with `Missing "./wasm/mist.wasm" specifier`: the map exposes ./mist.wasm.
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+      exports: Record<string, unknown>;
+    };
+    const sources = ['README.md', 'src/prover.ts'].map((f) => readFileSync(resolve(ROOT, f), 'utf-8'));
+    const subpaths = new Set(
+      sources.flatMap((s) => [...s.matchAll(/@mistcash\/sdk(\/[\w./-]+?)(?:\?\w+)?['"]/g)].map((m) => `.${m[1]}`)),
+    );
+    expect(subpaths.size).toBeGreaterThan(0);
+    for (const sub of subpaths) {
+      expect(Object.keys(pkg.exports), `documented import @mistcash/sdk${sub.slice(1)} is not exported`).toContain(sub);
+    }
+  });
+});
