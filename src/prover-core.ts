@@ -7,6 +7,9 @@ export type FullProverAdapter = {
   decrypt: (ukx: string, commitments: string[]) => { keyIndex: number; plaintext: string[] } | null | Promise<{ keyIndex: number; plaintext: string[] } | null>;
 };
 
+/** Where proofs run. `fallbackReason` says why a WebGPU prover is on the CPU. */
+export type ProverInfo = { backend: 'webgpu' | 'cpu'; fallbackReason?: string };
+
 const REQUIRED_EXPORTS = ['spend', 'decrypt', 'hash2', 'hash3'] as const;
 
 export type InstantiateFn = (

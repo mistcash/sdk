@@ -1,12 +1,17 @@
 import { loadProver } from './prover.js';
+import { loadWebGPUProver } from './prover.webgpu.js';
+import type { FullProverAdapter, ProverInfo } from './prover-core.js';
 
-type Request = { id: number; method: string; args: unknown[]; wasmUrl?: string };
+type Request = { id: number; method: string; args: unknown[]; wasmUrl?: string; webgpu?: boolean };
 
-let proverPromise: ReturnType<typeof loadProver> | undefined;
+let proverPromise: Promise<FullProverAdapter & ProverInfo> | undefined;
 
-function ensureLoaded(wasmUrl?: string) {
+function ensureLoaded(wasmUrl?: string, webgpu?: boolean) {
   if (!proverPromise) {
-    proverPromise = loadProver(wasmUrl).catch((e) => { proverPromise = undefined; throw e; });
+    proverPromise = (webgpu
+      ? loadWebGPUProver(wasmUrl)
+      : loadProver(wasmUrl).then((p) => ({ ...p, backend: 'cpu' as const }))
+    ).catch((e) => { proverPromise = undefined; throw e; });
   }
   return proverPromise;
 }
@@ -30,15 +35,16 @@ function describeError(err: unknown): string {
 }
 
 export async function handleMessage(e: { data: Request }): Promise<void> {
-  const { id, method, args, wasmUrl } = e.data;
+  const { id, method, args, wasmUrl, webgpu } = e.data;
   try {
-    const prover = await ensureLoaded(wasmUrl);
+    const prover = await ensureLoaded(wasmUrl, webgpu);
     let result: unknown;
     switch (method) {
       case 'hash2': result = await prover.hash2(args[0] as string, args[1] as string); break;
       case 'hash3': result = await prover.hash3(args[0] as string, args[1] as string, args[2] as string); break;
       case 'spend': result = await prover.spend(args[0] as string); break;
       case 'decrypt': result = await prover.decrypt(args[0] as string, args[1] as string[]); break;
+      case 'backend': result = { backend: prover.backend, ...(prover.fallbackReason !== undefined ? { fallbackReason: prover.fallbackReason } : {}) }; break;
       default: throw new Error(`Unknown method: ${method}`);
     }
     self.postMessage({ id, result });

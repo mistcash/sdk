@@ -8,7 +8,12 @@ export default defineConfig([
     clean: true,
   },
   {
-    entry: { prover: 'src/prover.ts', 'prover.node': 'src/prover.node.ts', 'prover-worker': 'src/prover-worker.ts' },
+    entry: {
+      prover: 'src/prover.ts',
+      'prover.node': 'src/prover.node.ts',
+      'prover.webgpu': 'src/prover.webgpu.ts',
+      'prover-worker': 'src/prover-worker.ts',
+    },
     format: ['esm'],
     dts: true,
     splitting: false,
