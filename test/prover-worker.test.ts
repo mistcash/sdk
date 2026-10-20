@@ -14,7 +14,7 @@
 // `dist/prover.js`'s `import.meta.url`, and structured-clone semantics.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { FullProverAdapter } from '../src/prover-core.js';
+import type { FullProverAdapter, ProverInfo } from '../src/prover-core.js';
 
 // The worker's loader is stubbed: this file is about the message protocol, and
 // the loader has its own tests. `importOriginal` keeps `createWorkerProver`,
@@ -24,8 +24,12 @@ vi.mock('../src/prover.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   loadProver: (...args: unknown[]) => fakeLoadProver(...(args as [])),
 }));
+const fakeLoadWebGPUProver = vi.fn<(url?: string) => Promise<FullProverAdapter & ProverInfo>>();
+vi.mock('../src/prover.webgpu.js', () => ({
+  loadWebGPUProver: (url?: string) => fakeLoadWebGPUProver(url),
+}));
 
-type AnyMsg = { id: number; method: string; args: unknown[]; wasmUrl?: string };
+type AnyMsg = { id: number; method: string; args: unknown[]; wasmUrl?: string; webgpu?: boolean };
 
 let workerInstance: FakeWorker | undefined;
 
@@ -96,11 +100,12 @@ async function setup(loadImpl?: () => Promise<FullProverAdapter>) {
     handleMessage: (e: { data: AnyMsg }) => Promise<void>;
   };
   const hostMod = await import('../src/prover.js') as {
-    createWorkerProver: (opts?: { wasmUrl?: string | URL }) => {
+    createWorkerProver: (opts?: { wasmUrl?: string | URL; webgpu?: boolean }) => {
       hash2: (a: string, b: string) => Promise<string>;
       hash3: (a: string, b: string, c: string) => Promise<string>;
       spend: (json: string) => Promise<unknown>;
       decrypt: (ukx: string, c: string[]) => Promise<unknown>;
+      backend: () => Promise<ProverInfo>;
       terminate: () => void;
     };
   };
@@ -171,6 +176,37 @@ describe('worker round trip', () => {
     await prover.hash2('1', '2');
 
     expect(workerInstance?.sent[0].wasmUrl).toBe('https://cdn.example/mist.wasm');
+  });
+
+  it('loads mist.wasm on the CPU loader and reports it', async () => {
+    const { host, restore: r } = await setup();
+    restore = r;
+    const prover = host.createWorkerProver();
+
+    await expect(prover.backend()).resolves.toEqual({ backend: 'cpu' });
+    expect(workerInstance?.sent[0].webgpu).toBeUndefined();
+    expect(fakeLoadWebGPUProver).not.toHaveBeenCalled();
+  });
+
+  it('with webgpu, defaults to mist-webgpu.wasm and loads it with the WebGPU loader', async () => {
+    const { host, restore: r } = await setup();
+    restore = r;
+    fakeLoadWebGPUProver.mockReset();
+    fakeLoadWebGPUProver.mockImplementation(async () => ({
+      ...fakeProver(),
+      backend: 'cpu',
+      fallbackReason: 'no WebGPU adapter',
+    }));
+    const prover = host.createWorkerProver({ webgpu: true });
+
+    await expect(prover.backend()).resolves.toEqual({ backend: 'cpu', fallbackReason: 'no WebGPU adapter' });
+    await expect(prover.hash2('1', '2')).resolves.toBe('h2(1,2)');
+
+    expect(workerInstance?.sent[0]).toMatchObject({ webgpu: true });
+    expect(workerInstance?.sent[0].wasmUrl).toMatch(/\/wasm\/mist-webgpu\.wasm$/);
+    expect(fakeLoadWebGPUProver).toHaveBeenCalledTimes(1);
+    expect(fakeLoadWebGPUProver.mock.calls[0]?.[0]).toMatch(/\/wasm\/mist-webgpu\.wasm$/);
+    expect(fakeLoadProver).not.toHaveBeenCalled();
   });
 
   it('rejects the caller when the worker reports an error', async () => {

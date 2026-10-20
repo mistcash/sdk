@@ -171,6 +171,45 @@ const client = new MistClient({ /* ... */ prover });
 prover.terminate();
 ```
 
+## WebGPU prover
+
+`@mistcash/sdk/prover/webgpu` proves with `mist-webgpu.wasm`: the same Go
+prover and proving key as `mist.wasm`, built with gnark's WebGPU backend, so
+the multi-scalar multiplications and the quotient run as WGSL compute
+shaders. On an Apple M-series laptop in Chromium a spend proof drops from
+~2.5 s to ~0.2 s; loading can take up to ~1.5 s longer (shader compilation
+and the one-time upload of the proving key to the GPU, both done before
+`loadWebGPUProver` resolves).
+
+```ts
+import { createWorkerProver } from '@mistcash/sdk/prover';
+
+const prover = createWorkerProver({ webgpu: true }); // optional: wasmUrl of mist-webgpu.wasm
+const { backend, fallbackReason } = await prover.backend(); // 'webgpu' | 'cpu'
+```
+
+or on the main thread:
+
+```ts
+import { loadWebGPUProver, hasWebGPU } from '@mistcash/sdk/prover/webgpu';
+
+const prover = await loadWebGPUProver(); // or a URL / bytes, as for loadProver
+prover.backend; // 'webgpu', or 'cpu' with prover.fallbackReason
+```
+
+It never fails for want of a GPU: with no `navigator.gpu`, no adapter, or a
+failed upload, the same wasm proves on the CPU and `backend` says `'cpu'`.
+Check `hasWebGPU()` first if you would rather load the smaller `mist.wasm`
+in that case. Its `spend` (and `hash2`/`hash3`/`decrypt`, via the adapter)
+return Promises, which `MistClient` already awaits.
+
+The GPU half is gnark's TypeScript runtime, vendored into
+`src/prover/gnark-webgpu/` by `npm run sync:wasm` from the exact gnark the
+wasm links (`circuit.json` `gnark`); the two halves share an unversioned
+byte protocol, so never update one without the other. gnark marks the
+backend experimental and unaudited. It changes how a proof is computed, not
+what is proven: the proofs verify against the same `ChamberVerifier`.
+
 ## Screened reserves
 
 A reserve's manager can name a **screener** (core#157): deposits into that
@@ -219,7 +258,8 @@ testing.
 
 The Go runtime registers itself as `globalThis.Go`, and the prover's exports
 land on `globalThis` too. Two provers from different `mist.wasm` versions in
-one page would collide, so load exactly one per page. `loadProver()` memoizes
+one page would collide, so load exactly one per page — and that includes
+`mist.wasm` next to `mist-webgpu.wasm`. `loadProver()` memoizes
 a single instance per module for this reason, and clears the memo if loading
 fails so a retry can succeed.
 
@@ -283,7 +323,8 @@ and the manual steps for ABIs and public inputs.
   openPayload, deposit screening)
 - **`prover`** (subpath): `loadProver`, `createWorkerProver` (returns
   `terminate()`; without it the worker and its 16MB key live for the page's
-  lifetime)
+  lifetime; `{ webgpu: true }` proves on the GPU)
+- **`prover/webgpu`** (subpath): `loadWebGPUProver`, `hasWebGPU`
 
 ## License
 
