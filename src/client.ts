@@ -36,6 +36,14 @@ function parseKeyIndices(raw: string | null): Record<string, number[]> {
   return {};
 }
 
+/**
+ * Per-store persist queue. Keyed by the StorageAdapter rather than held per
+ * client, so every client sharing one store in this realm serialises its
+ * read-merge-write behind the others. (Separate tabs share no memory; this
+ * cannot order their writes.)
+ */
+const persistQueues = new WeakMap<StorageAdapter, Promise<void>>();
+
 export interface MistClientOpts {
   book: AddressBook;
   chainId: number | string;
@@ -98,8 +106,6 @@ export class MistClient {
   ukx: Record<string, string> = {};
   /** Used key indices per ukx, for CSPRNG selection. */
   usedKeyIndices: Map<string, Set<number>> = new Map();
-  /** Serialises persistKeyIndices so a read-merge-write cannot interleave. */
-  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(opts: MistClientOpts) {
     this.book = opts.book;
@@ -493,13 +499,14 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
    * one key, so two clients (or two browser tabs) sharing a StorageAdapter
    * would otherwise erase each other's indices on every spend. Losing an index
    * means the same private-tx key can be drawn twice, and Chamber rejects a
-   * reused one. Writes are chained so two concurrent persists cannot interleave
-   * a read and a write around each other.
+   * reused one. Writes are chained per store (see `persistQueues`) so two
+   * concurrent persists, from this client or another, cannot interleave a read
+   * and a write around each other.
    */
   private persistKeyIndices(): Promise<void> {
     const store = this.store;
     if (!store) return Promise.resolve();
-    this.persistQueue = this.persistQueue.then(async () => {
+    const next = (persistQueues.get(store) ?? Promise.resolve()).then(async () => {
       const merged = parseKeyIndices(await store.get(KEY_INDICES_KEY));
       for (const [ukx, used] of this.usedKeyIndices) {
         if (used.size === 0) continue;
@@ -510,7 +517,8 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
       // A store that throws must not fail an otherwise successful spend; the
       // in-memory set still guards this session.
     });
-    return this.persistQueue;
+    persistQueues.set(store, next);
+    return next;
   }
 
   /** Restore used key indices from store. Call once after construction. */
