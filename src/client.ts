@@ -315,6 +315,9 @@ export class MistClient {
 
     const owner = await this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
+    // Re-read the store before drawing: another live client sharing it may have
+    // used an index since our last restore. A failed read falls back to memory.
+    if (opts.keyIndex === undefined && ukx !== '0') await this.restoreKeyIndices().catch(() => {});
     const keyIndex = opts.keyIndex ?? (ukx === '0' ? randomKeyIndex() : pickUnusedKeyIndex(this.getUsedIndices(ukx)));
     const out: SpendRequest['Out'] = [
       { id: opts.to ?? null, Owner: opts.to ? await this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
@@ -471,11 +474,10 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   /**
    * Get used key indices for a ukx.
    *
-   * In-memory only. This does not read the store: loading is an explicit
-   * `restoreKeyIndices()` call because `store.get` may be async and the caller
-   * needs the set synchronously to draw an index. A host that never calls
-   * `restoreKeyIndices()` starts every session with an empty set, which is
-   * exactly how a duplicate private-tx key gets drawn and rejected by Chamber.
+   * In-memory only. This does not read the store, because `store.get` may be
+   * async and the caller needs the set synchronously; `spend()` merges the
+   * store in via `restoreKeyIndices()` just before drawing, so an index another
+   * client sharing the store already used is not drawn again.
    */
   private getUsedIndices(ukx: string): Set<number> {
     let used = this.usedKeyIndices.get(ukx);
@@ -521,12 +523,18 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     return next;
   }
 
-  /** Restore used key indices from store. Call once after construction. */
+  /**
+   * Merge used key indices from the store into memory. Union, never replace,
+   * so indices this client recorded are kept. `spend()` calls this before
+   * drawing an index; calling it after construction is still useful to load
+   * the set early.
+   */
   async restoreKeyIndices(): Promise<void> {
     if (!this.store) return;
     const obj = parseKeyIndices(await this.store.get(KEY_INDICES_KEY));
     for (const [ukx, indices] of Object.entries(obj)) {
-      this.usedKeyIndices.set(ukx, new Set(indices));
+      const used = this.getUsedIndices(ukx);
+      for (const i of indices) used.add(i);
     }
   }
 
