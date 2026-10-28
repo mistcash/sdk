@@ -42,6 +42,8 @@
   "scripts": {
     "build": "tsup",
     "sync:wasm": "node scripts/sync-wasm.mjs",
+    "abis": "node scripts/sync-abis.mjs",
+    "abis:check": "node scripts/sync-abis.mjs --check",
     "dev": "tsup --watch",
     "prepack": "node scripts/prepack.mjs",
     "test": "vitest run",
