@@ -15,6 +15,27 @@ import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDepo
 /** Single store key holding the per-ukx used key-index map. */
 const KEY_INDICES_KEY = 'mist:keyIndices';
 
+/**
+ * Parse the stored key-index map. An unparsable or wrongly shaped value is
+ * treated as empty (and overwritten by the next persist) rather than thrown:
+ * throwing would make every later persist and restore fail on the same value.
+ */
+function parseKeyIndices(raw: string | null): Record<string, number[]> {
+  if (!raw) return {};
+  try {
+    const obj: unknown = JSON.parse(raw);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      const out: Record<string, number[]> = {};
+      for (const [ukx, v] of Object.entries(obj)) if (Array.isArray(v)) out[ukx] = v.filter(Number.isInteger);
+      return out;
+    }
+  } catch {
+    // Fall through to the warning below.
+  }
+  console.warn(`MistClient: ignoring unparsable ${KEY_INDICES_KEY} in store; it will be overwritten`);
+  return {};
+}
+
 export interface MistClientOpts {
   book: AddressBook;
   chainId: number | string;
@@ -479,8 +500,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     const store = this.store;
     if (!store) return Promise.resolve();
     this.persistQueue = this.persistQueue.then(async () => {
-      const raw = await store.get(KEY_INDICES_KEY);
-      const merged: Record<string, number[]> = raw ? JSON.parse(raw) : {};
+      const merged = parseKeyIndices(await store.get(KEY_INDICES_KEY));
       for (const [ukx, used] of this.usedKeyIndices) {
         if (used.size === 0) continue;
         merged[ukx] = [...new Set([...(merged[ukx] ?? []), ...used])];
@@ -496,9 +516,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   /** Restore used key indices from store. Call once after construction. */
   async restoreKeyIndices(): Promise<void> {
     if (!this.store) return;
-    const raw = await this.store.get(KEY_INDICES_KEY);
-    if (!raw) return;
-    const obj = JSON.parse(raw) as Record<string, number[]>;
+    const obj = parseKeyIndices(await this.store.get(KEY_INDICES_KEY));
     for (const [ukx, indices] of Object.entries(obj)) {
       this.usedKeyIndices.set(ukx, new Set(indices));
     }
