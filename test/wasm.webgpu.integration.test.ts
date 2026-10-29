@@ -12,7 +12,7 @@ import { describe, expect, it, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildSpendRequest, serializeSpendRequest, type SpendResult } from '../src/proving.js';
 import type { WebGPUProver } from '../src/prover.webgpu.js';
-import { WEBGPU_WASM_FILE, hasWebGPUWasm, SYNC_HINT } from './helpers/artifacts.js';
+import { WEBGPU_WASM_FILE, hasWebGPUWasm, missingWebGPUWasm, SYNC_HINT } from './helpers/artifacts.js';
 
 let prover: WebGPUProver | undefined;
 
@@ -70,7 +70,15 @@ describe('mist-webgpu.wasm integration', () => {
     expect((res as { error?: string }).error).not.toMatch(/Failed to parse|cannot unmarshal/);
   });
 
-  it.skipIf(hasWebGPUWasm)('skips when mist-webgpu.wasm is absent', () => {
-    console.log(`Skipping mist-webgpu.wasm test: ${WEBGPU_WASM_FILE} not found. ${SYNC_HINT}`);
+  // Same rule as wasm.integration.test.ts: under CI a missing wasm fails the
+  // run unless the workflow opts in with MIST_ALLOW_WASM_SKIP.
+  it.skipIf(hasWebGPUWasm)('mist-webgpu.wasm artifacts are absent', () => {
+    const message = `mist-webgpu.wasm integration tests cannot run: ${missingWebGPUWasm}. ${SYNC_HINT}`;
+    if (process.env.CI && !process.env.MIST_ALLOW_WASM_SKIP) {
+      throw new Error(
+        `${message}\nRefusing to skip silently under CI. Provide the wasm, or set MIST_ALLOW_WASM_SKIP=1 to acknowledge the skip.`,
+      );
+    }
+    console.warn(`WARNING: ${message} (the tests above were skipped)`);
   });
 });

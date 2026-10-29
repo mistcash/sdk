@@ -39,5 +39,10 @@ export const missingWasm = [
   ...(!existsSync(WASM_EXEC) ? [`wasm_exec.js not found at ${WASM_EXEC}`] : []),
 ].join('; ');
 
+export const missingWebGPUWasm = [
+  ...(!existsSync(WEBGPU_WASM_FILE) ? [`mist-webgpu.wasm not found at ${WEBGPU_WASM_FILE}`] : []),
+  ...(!existsSync(WASM_EXEC) ? [`wasm_exec.js not found at ${WASM_EXEC}`] : []),
+].join('; ');
+
 export const SYNC_HINT =
   'vendor the prover artifacts with: MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm';
