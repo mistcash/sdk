@@ -15,6 +15,35 @@ import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDepo
 /** Single store key holding the per-ukx used key-index map. */
 const KEY_INDICES_KEY = 'mist:keyIndices';
 
+/**
+ * Parse the stored key-index map. An unparsable or wrongly shaped value is
+ * treated as empty (and overwritten by the next persist) rather than thrown:
+ * throwing would make every later persist and restore fail on the same value.
+ */
+function parseKeyIndices(raw: string | null): Record<string, number[]> {
+  if (!raw) return {};
+  try {
+    const obj: unknown = JSON.parse(raw);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      const out: Record<string, number[]> = {};
+      for (const [ukx, v] of Object.entries(obj)) if (Array.isArray(v)) out[ukx] = v.filter(Number.isInteger);
+      return out;
+    }
+  } catch {
+    // Fall through to the warning below.
+  }
+  console.warn(`MistClient: ignoring unparsable ${KEY_INDICES_KEY} in store; it will be overwritten`);
+  return {};
+}
+
+/**
+ * Per-store persist queue. Keyed by the StorageAdapter rather than held per
+ * client, so every client sharing one store in this realm serialises its
+ * read-merge-write behind the others. (Separate tabs share no memory; this
+ * cannot order their writes.)
+ */
+const persistQueues = new WeakMap<StorageAdapter, Promise<void>>();
+
 export interface MistClientOpts {
   book: AddressBook;
   chainId: number | string;
@@ -77,8 +106,6 @@ export class MistClient {
   ukx: Record<string, string> = {};
   /** Used key indices per ukx, for CSPRNG selection. */
   usedKeyIndices: Map<string, Set<number>> = new Map();
-  /** Serialises persistKeyIndices so a read-merge-write cannot interleave. */
-  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(opts: MistClientOpts) {
     this.book = opts.book;
@@ -288,6 +315,9 @@ export class MistClient {
 
     const owner = await this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
+    // Re-read the store before drawing: another live client sharing it may have
+    // used an index since our last restore. A failed read falls back to memory.
+    if (opts.keyIndex === undefined && ukx !== '0') await this.restoreKeyIndices().catch(() => {});
     const keyIndex = opts.keyIndex ?? (ukx === '0' ? randomKeyIndex() : pickUnusedKeyIndex(this.getUsedIndices(ukx)));
     const out: SpendRequest['Out'] = [
       { id: opts.to ?? null, Owner: opts.to ? await this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
@@ -444,11 +474,10 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   /**
    * Get used key indices for a ukx.
    *
-   * In-memory only. This does not read the store: loading is an explicit
-   * `restoreKeyIndices()` call because `store.get` may be async and the caller
-   * needs the set synchronously to draw an index. A host that never calls
-   * `restoreKeyIndices()` starts every session with an empty set, which is
-   * exactly how a duplicate private-tx key gets drawn and rejected by Chamber.
+   * In-memory only. This does not read the store, because `store.get` may be
+   * async and the caller needs the set synchronously; `spend()` merges the
+   * store in via `restoreKeyIndices()` just before drawing, so an index another
+   * client sharing the store already used is not drawn again.
    */
   private getUsedIndices(ukx: string): Set<number> {
     let used = this.usedKeyIndices.get(ukx);
@@ -472,15 +501,15 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
    * one key, so two clients (or two browser tabs) sharing a StorageAdapter
    * would otherwise erase each other's indices on every spend. Losing an index
    * means the same private-tx key can be drawn twice, and Chamber rejects a
-   * reused one. Writes are chained so two concurrent persists cannot interleave
-   * a read and a write around each other.
+   * reused one. Writes are chained per store (see `persistQueues`) so two
+   * concurrent persists, from this client or another, cannot interleave a read
+   * and a write around each other.
    */
   private persistKeyIndices(): Promise<void> {
     const store = this.store;
     if (!store) return Promise.resolve();
-    this.persistQueue = this.persistQueue.then(async () => {
-      const raw = await store.get(KEY_INDICES_KEY);
-      const merged: Record<string, number[]> = raw ? JSON.parse(raw) : {};
+    const next = (persistQueues.get(store) ?? Promise.resolve()).then(async () => {
+      const merged = parseKeyIndices(await store.get(KEY_INDICES_KEY));
       for (const [ukx, used] of this.usedKeyIndices) {
         if (used.size === 0) continue;
         merged[ukx] = [...new Set([...(merged[ukx] ?? []), ...used])];
@@ -490,17 +519,22 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
       // A store that throws must not fail an otherwise successful spend; the
       // in-memory set still guards this session.
     });
-    return this.persistQueue;
+    persistQueues.set(store, next);
+    return next;
   }
 
-  /** Restore used key indices from store. Call once after construction. */
+  /**
+   * Merge used key indices from the store into memory. Union, never replace,
+   * so indices this client recorded are kept. `spend()` calls this before
+   * drawing an index; calling it after construction is still useful to load
+   * the set early.
+   */
   async restoreKeyIndices(): Promise<void> {
     if (!this.store) return;
-    const raw = await this.store.get(KEY_INDICES_KEY);
-    if (!raw) return;
-    const obj = JSON.parse(raw) as Record<string, number[]>;
+    const obj = parseKeyIndices(await this.store.get(KEY_INDICES_KEY));
     for (const [ukx, indices] of Object.entries(obj)) {
-      this.usedKeyIndices.set(ukx, new Set(indices));
+      const used = this.getUsedIndices(ukx);
+      for (const i of indices) used.add(i);
     }
   }
 
