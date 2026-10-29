@@ -1,7 +1,8 @@
 # Releasing `@mistcash/sdk`
 
-The published package ships `wasm/mist.wasm` (the proving key, ~16 MB). That
-file is gitignored and built in `core-deploy`, which is private and not yet
+The published package ships `wasm/mist.wasm` (the proving key, ~16 MB) and
+`wasm/mist-webgpu.wasm` (the same prover built with gnark's WebGPU backend).
+Both are gitignored and built in `core-deploy`, which is private and not yet
 published as a release asset. CI therefore cannot produce a publishable
 tarball, so **publishing is manual for now**.
 
@@ -24,8 +25,9 @@ On a machine with a `core-deploy` checkout:
 2. Sync the wasm and circuit record:
    `MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm`
    Commit the resulting `circuit.json` change if there is one. `prepack`
-   refuses to pack a wasm whose sha256 does not match `circuit.json`, or that
-   has no recorded `core` commit.
+   refuses to pack a wasm whose sha256 does not match `circuit.json`, a
+   vendored gnark WebGPU runtime from another gnark than `mist-webgpu.wasm`, or
+   a `circuit.json` with no recorded `core` commit.
 3. Verify with the real wasm: `npm ci && npm run verify`. Check that the wasm
    tests ran and were not skipped.
 4. Bump the version: `npm version <patch|minor|major>` (this commits and tags
@@ -41,8 +43,9 @@ On a machine with a `core-deploy` checkout:
 
 ## Moving to automated releases
 
-Once core publishes `mist.wasm` as a release asset: replace the "Require
-wasm/mist.wasm" guard in `release.yml` with a download step, do the same in
-`ci.yml` and remove `MIST_ALLOW_WASM_SKIP`, and add an `NPM_TOKEN` repository
-secret (an npm automation token with publish rights to `@mistcash`). Then
-steps 5 to 7 collapse into pushing the tag.
+Once core publishes `mist.wasm` and `mist-webgpu.wasm` as release assets:
+replace the "Require wasm/mist.wasm and wasm/mist-webgpu.wasm" guard in
+`release.yml` with a download step, do the same in `ci.yml` and remove
+`MIST_ALLOW_WASM_SKIP`, and add an `NPM_TOKEN` repository secret (an npm
+automation token with publish rights to `@mistcash`). Then steps 5 to 7
+collapse into pushing the tag.

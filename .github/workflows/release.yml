@@ -64,12 +64,13 @@ jobs:
             exit 1
           fi
 
-      # TODO: replace this guard with a step that downloads mist.wasm from a
-      # core release asset (and runs scripts/sync-wasm.mjs-equivalent checks)
-      # once one exists. prepack still verifies the sha256 against circuit.json.
-      - name: Require wasm/mist.wasm
+      # TODO: replace this guard with a step that downloads mist.wasm and
+      # mist-webgpu.wasm from a core release asset (and runs
+      # scripts/sync-wasm.mjs-equivalent checks) once one exists. prepack still
+      # verifies both sha256s against circuit.json.
+      - name: Require wasm/mist.wasm and wasm/mist-webgpu.wasm
         run: |
-          if [ ! -f wasm/mist.wasm ]; then
+          if [ ! -f wasm/mist.wasm ] || [ ! -f wasm/mist-webgpu.wasm ]; then
             echo "::error::wasm missing: publish from a host with core-deploy until core ships a wasm release asset. See RELEASING.md."
             exit 1
           fi
