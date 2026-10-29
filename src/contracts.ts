@@ -1,120 +1,27 @@
-// Contract surface extracted from `playground/chain.js` (runtime ABI) and
-// `playground/explorer.js` ABIS (from `forge inspect <contract> abi`).
-// The SDK imports viem for encoding and keccak (identity, pq, client), but
-// the ChainAdapter keeps it independent of any one client library for
-// transport.
+// Contract surface. The ABIs are generated from `mistcash/core` by
+// `npm run abis` (scripts/sync-abis.mjs, `forge inspect <contract> abi`) into
+// abis.generated.ts; nothing here is hand-written. `npm run abis:check` fails
+// when they drift from core. The SDK imports viem for encoding and keccak
+// (identity, pq, client), but the ChainAdapter keeps it independent of any
+// one client library for transport.
 
 import type { Hex } from './types.js';
+import { abisHumanReadable, coreAbiHumanReadable, screeningAbiHumanReadable } from './abis.generated.js';
 
 /**
  * Deposit screening (core#157): a reserve's screener approves queued
  * deposits into the tx tree; depositors reclaim pending or rejected ones.
  */
-export const SCREENING_ABI = [
-  'function setReserveScreener(address reserve, address screener)',
-  'function reserveScreeners(address reserve) view returns (address)',
-  'function depositCount() view returns (uint256)',
-  'function pendingDeposits(uint256 depositId) view returns (address depositor, uint8 status, address reserve, address asset, uint256 amount, uint256 noteHash)',
-  'function approveDeposits(uint256[] depositIds, bytes32 evidence)',
-  'function rejectDeposits(uint256[] depositIds, bytes32 evidence)',
-  'function reclaimDeposit(uint256 depositId)',
-  'event ReserveScreenerSet(address indexed reserve, address indexed screener)',
-  'event DepositQueued(uint256 indexed depositId, uint256 noteHash, address indexed reserve, address indexed depositor, address asset, uint256 amount)',
-  'event DepositApproved(uint256 indexed depositId, uint256 indexed noteHash, bytes32 evidence)',
-  'event DepositRejected(uint256 indexed depositId, bytes32 evidence)',
-  'event DepositReclaimed(uint256 indexed depositId, address indexed depositor)',
-] as const;
+export const SCREENING_ABI = screeningAbiHumanReadable;
 
-/** Calls the playground actually makes (`chain.js` abi). */
-export const CORE_ABI = [
-  'function owner() view returns (address)',
-  'function verifier() view returns (address)',
-  'function merkleRoot() view returns (uint256)',
-  'function zkStateRoot() view returns (uint256)',
-  'function zkStateLeaf(uint256) view returns (uint256)',
-  'function getTxArray() view returns (uint256[])',
-  'function reserveConfigs(address) view returns (uint256 leafIndex, uint256 reserveConfig, uint256 stateRoot)',
-  'function registerReserve(address, uint256, uint256) returns (address)',
-  'function setVerifier(address)',
-  'function deposit(address, uint256, uint256, address) returns (uint256)',
-  'function handleZkp(uint256[8], uint256[14], uint256[])',
-  'function reserveManager() view returns (address)',
-  'function auditorKey() view returns (uint256, uint256)',
-  'function registeredUsersRoot() view returns (uint256)',
-  'function registeredUsersCount() view returns (uint256)',
-  'function setRegisterUserCallback(address, bytes4)',
-  'function registerUserCallback() view returns (address, bytes4)',
-  'function registerUser(bytes) returns (uint256)',
-  'function updateAuditorKey(uint256, uint256)',
-  'function registerUserDigest(address, uint256) view returns (bytes32)',
-  'function symbol() view returns (string)',
-  'function balanceOf(address) view returns (uint256)',
-  'function approve(address, uint256) returns (bool)',
-  'function transfer(address, uint256) returns (bool)',
-  'event UserRegistered(uint256 indexed leaf, uint256 index, uint256 root)',
-  ...SCREENING_ABI,
-] as const;
+/**
+ * The reads and writes a host's ChainAdapter needs for MistClient and the
+ * playground, across Chamber, Reserve, the registrar and the token.
+ */
+export const CORE_ABI = [...coreAbiHumanReadable, ...SCREENING_ABI] as const;
 
-/** Full per-contract decoding surface (`explorer.js` ABIS). */
-export const ABIS = {
-  Chamber: [
-    'function deposit(address reserve_, uint256 ownerCommitment_, uint256 amount, address asset_) returns (uint256)',
-    'function handleZkp(uint256[8] proof, uint256[14] input, uint256[] auditorCommitments_)',
-    'function registerReserve(address reserveManager_, uint256 keyHash_, uint256 keyInputPoint_) returns (address)',
-    'function setReserveConfig(uint256 reserveConfig)',
-    'function setReserveStateRoot(uint256 stateRoot)',
-    'function setVerifier(address verifier_)',
-    'function transferOwnership(address newOwner)',
-    'function renounceOwnership()',
-    'function merkleRoot() view returns (uint256)',
-    'function zkStateRoot() view returns (uint256)',
-    'function reserveConfigs(address) view returns (uint256 leafIndex, uint256 reserveConfig, uint256 stateRoot)',
-    'function nullified(uint256) view returns (bool)',
-    'function chamberId() view returns (uint256)',
-    ...SCREENING_ABI,
-    'event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)',
-    'event VerifierUpdated(address indexed verifier)',
-    'error OwnableInvalidOwner(address owner)',
-    'error OwnableUnauthorizedAccount(address account)',
-    'error ReentrancyGuardReentrantCall()',
-    'error TreeIdAlreadySet()',
-    'error TreeIdOutOfRange()',
-  ],
-  Reserve: [
-    'function deposit(address from, uint256 amount, address asset) returns (uint256 received)',
-    'function withdraw(address to, uint256 amount, address asset)',
-    'function registerUser(bytes data) returns (uint256 leaf)',
-    'function setRegisterUserCallback(address target, bytes4 entrypoint)',
-    'function updateAuditorKey(uint256 keyHash_, uint256 keyInputPoint_)',
-    'function reserveManager() view returns (address)',
-    'function registeredUsersRoot() view returns (uint256)',
-    'event RegisterUserCallbackSet(address indexed target, bytes4 entrypoint)',
-    'event UserRegistered(uint256 indexed leaf, uint256 index, uint256 root)',
-    'error SafeERC20FailedOperation(address token)',
-  ],
-  ManagerSigRegistrar: [
-    'function registerUser(uint256 mistAddr, uint256 userKeyExchange, bytes signature) view returns (uint256 leaf)',
-    'function registerUserDigest(address reserve, uint256 leaf) view returns (bytes32)',
-  ],
-  ChamberVerifier: [
-    'function verifyProof(bytes proof, uint256[14] input) view',
-    'error ProofInvalid()',
-    'error PublicInputNotInField()',
-  ],
-  ERC20: [
-    'function transfer(address to, uint256 value) returns (bool)',
-    'function transferFrom(address from, address to, uint256 value) returns (bool)',
-    'function approve(address spender, uint256 value) returns (bool)',
-    'function balanceOf(address account) view returns (uint256)',
-    'function allowance(address owner, address spender) view returns (uint256)',
-    'event Transfer(address indexed from, address indexed to, uint256 value)',
-    'event Approval(address indexed owner, address indexed spender, uint256 value)',
-    'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
-    'error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)',
-    'error ERC20InvalidReceiver(address receiver)',
-    'error ERC20InvalidSender(address sender)',
-  ],
-} as const;
+/** Full per-contract decoding surface, as human-readable signatures. */
+export const ABIS = abisHumanReadable;
 
 /** Deployment address book (`core-deploy/dist/deployments/*.json`). */
 export interface AddressBook {
