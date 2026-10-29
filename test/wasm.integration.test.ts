@@ -101,7 +101,17 @@ describe('wasm integration', () => {
     expect(hash2('1', '2')).toMatch(/^\d+$/);
   });
 
-  it.skipIf(hasWasm)('skips when wasm files are absent', () => {
-    console.log(`Skipping wasm test: ${missingWasm}. ${SYNC_HINT}`);
+  // A missing wasm used to skip silently, so a CI run could go green without
+  // ever touching the circuit. Under CI that is now a failure unless the
+  // workflow opts in explicitly with MIST_ALLOW_WASM_SKIP; locally it is a
+  // loud warning.
+  it.skipIf(hasWasm)('wasm artifacts are absent', () => {
+    const message = `wasm integration tests cannot run: ${missingWasm}. ${SYNC_HINT}`;
+    if (process.env.CI && !process.env.MIST_ALLOW_WASM_SKIP) {
+      throw new Error(
+        `${message}\nRefusing to skip silently under CI. Provide the wasm, or set MIST_ALLOW_WASM_SKIP=1 to acknowledge the skip.`,
+      );
+    }
+    console.warn(`WARNING: ${message} (the tests above were skipped)`);
   });
 });

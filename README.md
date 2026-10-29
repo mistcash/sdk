@@ -307,8 +307,21 @@ MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm && npm test
 It copies `mist.wasm` and `wasm_exec.js`, writes `circuit.json` (sha256, size,
 Go version, and the `core` submodule commit the key was built from), and
 `prepack` refuses to pack a wasm whose checksum or circuit commit does not
-match. See [CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full mirrored surface
-and the manual steps for ABIs and public inputs.
+match. The contract ABIs are generated from `core` and checked against it, along
+with the order of `PUBLIC_INPUTS`:
+
+```sh
+MIST_CORE=/path/to/core npm run abis:check   # exit 1 with a diff on drift
+MIST_CORE=/path/to/core npm run abis         # regenerate src/abis.generated.ts
+```
+
+See [CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full mirrored surface.
+
+## Releasing
+
+CI runs `npm run verify` on every PR, but the published package needs the
+vendored `wasm/mist.wasm`, which CI cannot fetch yet, so releases are manual.
+See [RELEASING.md](./RELEASING.md).
 
 ## Architecture
 

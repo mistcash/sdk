@@ -4,16 +4,46 @@
 // (`MistCallbacks`) are all injected — set `sendTransaction` to route MIST
 // spends through a relayer while public spends go direct.
 
-import { decodeEventLog, encodeAbiParameters, encodeFunctionData, parseAbi, parseAbiParameters } from 'viem';
+import { decodeEventLog, encodeAbiParameters, encodeFunctionData, parseAbiParameters } from 'viem';
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, randomKeyIndex, type ProverAdapter, type SpendRequest } from './proving.js';
 import { deriveUkx, encapsulate } from './pq.js';
-import { SCREENING_ABI, type AddressBook } from './contracts.js';
+import type { AddressBook } from './contracts.js';
+import { chamberAbi, erc20Abi, reserveAbi } from './abis.generated.js';
 import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDeposit, StorageAdapter, TxReceipt } from './types.js';
 
 /** Single store key holding the per-ukx used key-index map. */
 const KEY_INDICES_KEY = 'mist:keyIndices';
+
+/**
+ * Parse the stored key-index map. An unparsable or wrongly shaped value is
+ * treated as empty (and overwritten by the next persist) rather than thrown:
+ * throwing would make every later persist and restore fail on the same value.
+ */
+function parseKeyIndices(raw: string | null): Record<string, number[]> {
+  if (!raw) return {};
+  try {
+    const obj: unknown = JSON.parse(raw);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      const out: Record<string, number[]> = {};
+      for (const [ukx, v] of Object.entries(obj)) if (Array.isArray(v)) out[ukx] = v.filter(Number.isInteger);
+      return out;
+    }
+  } catch {
+    // Fall through to the warning below.
+  }
+  console.warn(`MistClient: ignoring unparsable ${KEY_INDICES_KEY} in store; it will be overwritten`);
+  return {};
+}
+
+/**
+ * Per-store persist queue. Keyed by the StorageAdapter rather than held per
+ * client, so every client sharing one store in this realm serialises its
+ * read-merge-write behind the others. (Separate tabs share no memory; this
+ * cannot order their writes.)
+ */
+const persistQueues = new WeakMap<StorageAdapter, Promise<void>>();
 
 export interface MistClientOpts {
   book: AddressBook;
@@ -77,8 +107,6 @@ export class MistClient {
   ukx: Record<string, string> = {};
   /** Used key indices per ukx, for CSPRNG selection. */
   usedKeyIndices: Map<string, Set<number>> = new Map();
-  /** Serialises persistKeyIndices so a read-merge-write cannot interleave. */
-  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(opts: MistClientOpts) {
     this.book = opts.book;
@@ -129,13 +157,13 @@ export class MistClient {
     this.progress('Approving');
     await this.write(
       this.book.token,
-      encodeFunctionData({ abi: ERC20_MIN, functionName: 'approve', args: [reserve, amount] }),
+      encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [reserve, amount] }),
       'approve',
     );
     this.progress('Depositing');
     const { receipt, result } = await this.write(
       this.book.chamber,
-      encodeFunctionData({ abi: CHAMBER_MIN, functionName: 'deposit', args: [reserve, BigInt(commitment), amount, this.book.token] }),
+      encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args: [reserve, BigInt(commitment), amount, this.book.token] }),
       'deposit',
     );
     const note: Note = { reserve, id, blinding, amount, hash: String(result ?? ''), kind: 'deposit' };
@@ -201,7 +229,7 @@ export class MistClient {
   async reclaimDeposit(depositId: string | bigint): Promise<TxReceipt> {
     const { receipt } = await this.write(
       this.book.chamber,
-      encodeFunctionData({ abi: SCREENING, functionName: 'reclaimDeposit', args: [BigInt(depositId)] }),
+      encodeFunctionData({ abi: chamberAbi, functionName: 'reclaimDeposit', args: [BigInt(depositId)] }),
       'reclaimDeposit',
     );
     for (const note of this.notes) if (note.depositId === String(depositId)) note.screening = 'reclaimed';
@@ -212,7 +240,7 @@ export class MistClient {
   async setReserveScreener(reserve: Hex, screener: Hex): Promise<TxReceipt> {
     const { receipt } = await this.write(
       this.book.chamber,
-      encodeFunctionData({ abi: SCREENING, functionName: 'setReserveScreener', args: [reserve, screener] }),
+      encodeFunctionData({ abi: chamberAbi, functionName: 'setReserveScreener', args: [reserve, screener] }),
       'setReserveScreener',
     );
     return receipt;
@@ -254,7 +282,7 @@ export class MistClient {
   ): Promise<TxReceipt> {
     const { receipt } = await this.write(
       this.book.chamber,
-      encodeFunctionData({ abi: SCREENING, functionName, args: [depositIds.map(BigInt), evidence] }),
+      encodeFunctionData({ abi: chamberAbi, functionName, args: [depositIds.map(BigInt), evidence] }),
       functionName,
     );
     return receipt;
@@ -265,10 +293,10 @@ export class MistClient {
     for (const log of receipt.logs ?? []) {
       if (log.address.toLowerCase() !== this.book.chamber.toLowerCase()) continue;
       try {
-        const { eventName, args } = decodeEventLog({ abi: SCREENING, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
+        const { eventName, args } = decodeEventLog({ abi: chamberAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
         if (eventName === 'DepositQueued') return { depositId: String(args.depositId), noteHash: String(args.noteHash) };
       } catch {
-        // Not a screening event.
+        // Not a Chamber event this ABI knows.
       }
     }
     return undefined;
@@ -288,6 +316,9 @@ export class MistClient {
 
     const owner = await this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
+    // Re-read the store before drawing: another live client sharing it may have
+    // used an index since our last restore. A failed read falls back to memory.
+    if (opts.keyIndex === undefined && ukx !== '0') await this.restoreKeyIndices().catch(() => {});
     const keyIndex = opts.keyIndex ?? (ukx === '0' ? randomKeyIndex() : pickUnusedKeyIndex(this.getUsedIndices(ukx)));
     const out: SpendRequest['Out'] = [
       { id: opts.to ?? null, Owner: opts.to ? await this.ownerFor(opts.to) : '0', Blinding: opts.blindingA ?? rand(), Amount: opts.amount },
@@ -318,7 +349,7 @@ export class MistClient {
     const { receipt } = await this.write(
       this.book.chamber,
       encodeFunctionData({
-        abi: CHAMBER_MIN,
+        abi: chamberAbi,
         functionName: 'handleZkp',
         args: [
           res.proof.map(BigInt) as unknown as readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint],
@@ -369,7 +400,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     if (ukx !== managerUkx) throw new Error('Client and manager derived different ukx values');
     this.progress('Registering');
     const data = encodeAbiParameters(parseAbiParameters('uint256, uint256, bytes'), [BigInt(mistAddr), BigInt(ukx), signature]);
-    await this.write(reserve, encodeFunctionData({ abi: RESERVE_MIN, functionName: 'registerUser', args: [data] }), 'registerUser');
+    await this.write(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'registerUser', args: [data] }), 'registerUser');
     this.ukx[`${reserve}:${mistAddr}`] = ukx;
     return { ukx };
   }
@@ -394,7 +425,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   async registerReserve(manager: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
     const { receipt } = await this.write(
       this.book.chamber,
-      encodeFunctionData({ abi: CHAMBER_MIN, functionName: 'registerReserve', args: [manager, keyHash, keyInputPoint] }),
+      encodeFunctionData({ abi: chamberAbi, functionName: 'registerReserve', args: [manager, keyHash, keyInputPoint] }),
       'registerReserve',
     );
     return receipt;
@@ -402,7 +433,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
 
   async setVerifier(verifier: Hex): Promise<TxReceipt> {
     const { receipt } = await this.write(
-      this.book.chamber, encodeFunctionData({ abi: CHAMBER_MIN, functionName: 'setVerifier', args: [verifier] }), 'setVerifier',
+      this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName: 'setVerifier', args: [verifier] }), 'setVerifier',
     );
     return receipt;
   }
@@ -410,7 +441,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   async setCallback(reserve: Hex, selector: Hex): Promise<TxReceipt> {
     const { receipt } = await this.write(
       reserve,
-      encodeFunctionData({ abi: RESERVE_MIN, functionName: 'setRegisterUserCallback', args: [this.book.registrar, selector] }),
+      encodeFunctionData({ abi: reserveAbi, functionName: 'setRegisterUserCallback', args: [this.book.registrar, selector] }),
       'setRegisterUserCallback',
     );
     return receipt;
@@ -418,7 +449,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
 
   async updateAuditorKey(reserve: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
     const { receipt } = await this.write(
-      reserve, encodeFunctionData({ abi: RESERVE_MIN, functionName: 'updateAuditorKey', args: [keyHash, keyInputPoint] }), 'updateAuditorKey',
+      reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'updateAuditorKey', args: [keyHash, keyInputPoint] }), 'updateAuditorKey',
     );
     return receipt;
   }
@@ -444,11 +475,10 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   /**
    * Get used key indices for a ukx.
    *
-   * In-memory only. This does not read the store: loading is an explicit
-   * `restoreKeyIndices()` call because `store.get` may be async and the caller
-   * needs the set synchronously to draw an index. A host that never calls
-   * `restoreKeyIndices()` starts every session with an empty set, which is
-   * exactly how a duplicate private-tx key gets drawn and rejected by Chamber.
+   * In-memory only. This does not read the store, because `store.get` may be
+   * async and the caller needs the set synchronously; `spend()` merges the
+   * store in via `restoreKeyIndices()` just before drawing, so an index another
+   * client sharing the store already used is not drawn again.
    */
   private getUsedIndices(ukx: string): Set<number> {
     let used = this.usedKeyIndices.get(ukx);
@@ -472,15 +502,15 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
    * one key, so two clients (or two browser tabs) sharing a StorageAdapter
    * would otherwise erase each other's indices on every spend. Losing an index
    * means the same private-tx key can be drawn twice, and Chamber rejects a
-   * reused one. Writes are chained so two concurrent persists cannot interleave
-   * a read and a write around each other.
+   * reused one. Writes are chained per store (see `persistQueues`) so two
+   * concurrent persists, from this client or another, cannot interleave a read
+   * and a write around each other.
    */
   private persistKeyIndices(): Promise<void> {
     const store = this.store;
     if (!store) return Promise.resolve();
-    this.persistQueue = this.persistQueue.then(async () => {
-      const raw = await store.get(KEY_INDICES_KEY);
-      const merged: Record<string, number[]> = raw ? JSON.parse(raw) : {};
+    const next = (persistQueues.get(store) ?? Promise.resolve()).then(async () => {
+      const merged = parseKeyIndices(await store.get(KEY_INDICES_KEY));
       for (const [ukx, used] of this.usedKeyIndices) {
         if (used.size === 0) continue;
         merged[ukx] = [...new Set([...(merged[ukx] ?? []), ...used])];
@@ -490,17 +520,22 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
       // A store that throws must not fail an otherwise successful spend; the
       // in-memory set still guards this session.
     });
-    return this.persistQueue;
+    persistQueues.set(store, next);
+    return next;
   }
 
-  /** Restore used key indices from store. Call once after construction. */
+  /**
+   * Merge used key indices from the store into memory. Union, never replace,
+   * so indices this client recorded are kept. `spend()` calls this before
+   * drawing an index; calling it after construction is still useful to load
+   * the set early.
+   */
   async restoreKeyIndices(): Promise<void> {
     if (!this.store) return;
-    const raw = await this.store.get(KEY_INDICES_KEY);
-    if (!raw) return;
-    const obj = JSON.parse(raw) as Record<string, number[]>;
+    const obj = parseKeyIndices(await this.store.get(KEY_INDICES_KEY));
     for (const [ukx, indices] of Object.entries(obj)) {
-      this.usedKeyIndices.set(ukx, new Set(indices));
+      const used = this.getUsedIndices(ukx);
+      for (const i of indices) used.add(i);
     }
   }
 
@@ -543,24 +578,4 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   }
 }
 
-const SCREENING = parseAbi(SCREENING_ABI);
-
 const DEPOSIT_STATUS: DepositStatus[] = ['none', 'pending', 'rejected'];
-
-// Minimal viem ABIs for the calls the client encodes (full surface in contracts.ts).
-const ERC20_MIN = [
-  { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] },
-] as const;
-
-const CHAMBER_MIN = [
-  { type: 'function', name: 'deposit', stateMutability: 'nonpayable', inputs: [{ name: 'reserve', type: 'address' }, { name: 'ownerCommitment', type: 'uint256' }, { name: 'amount', type: 'uint256' }, { name: 'asset', type: 'address' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'handleZkp', stateMutability: 'nonpayable', inputs: [{ name: 'proof', type: 'uint256[8]' }, { name: 'input', type: 'uint256[14]' }, { name: 'auditorCommitments', type: 'uint256[]' }], outputs: [] },
-  { type: 'function', name: 'registerReserve', stateMutability: 'nonpayable', inputs: [{ name: 'reserveManager', type: 'address' }, { name: 'keyHash', type: 'uint256' }, { name: 'keyInputPoint', type: 'uint256' }], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'setVerifier', stateMutability: 'nonpayable', inputs: [{ name: 'verifier', type: 'address' }], outputs: [] },
-] as const;
-
-const RESERVE_MIN = [
-  { type: 'function', name: 'registerUser', stateMutability: 'nonpayable', inputs: [{ name: 'data', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'setRegisterUserCallback', stateMutability: 'nonpayable', inputs: [{ name: 'target', type: 'address' }, { name: 'entrypoint', type: 'bytes4' }], outputs: [] },
-  { type: 'function', name: 'updateAuditorKey', stateMutability: 'nonpayable', inputs: [{ name: 'keyHash', type: 'uint256' }, { name: 'keyInputPoint', type: 'uint256' }], outputs: [] },
-] as const;

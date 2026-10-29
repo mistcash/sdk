@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # package.json engines is ^20.19 || >=22.12. The whole job takes about
+        # a minute, so covering both supported majors costs next to nothing.
+        node: [20, 22]
+    env:
+      # The real-wasm tests (test/wasm.integration.test.ts) need
+      # wasm/mist.wasm, which is gitignored and built in core-deploy (private;
+      # not yet published as a release asset), so CI cannot fetch it. Without
+      # this flag a missing wasm FAILS the run under CI; setting it makes the
+      # skip an explicit, reviewable decision instead of a silent one.
+      # TODO: drop this and download the wasm from a core release asset once
+      # core publishes one, so CI exercises the real circuit.
+      MIST_ALLOW_WASM_SKIP: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run verify

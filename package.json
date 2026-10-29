@@ -28,7 +28,9 @@
       "default": "./dist/prover.webgpu.js"
     },
     "./mist.wasm": "./wasm/mist.wasm",
+    "./wasm/mist.wasm": "./wasm/mist.wasm",
     "./mist-webgpu.wasm": "./wasm/mist-webgpu.wasm",
+    "./wasm/mist-webgpu.wasm": "./wasm/mist-webgpu.wasm",
     "./circuit.json": "./circuit.json",
     "./package.json": "./package.json"
   },
@@ -47,6 +49,8 @@
   "scripts": {
     "build": "tsup",
     "sync:wasm": "node scripts/sync-wasm.mjs",
+    "abis": "node scripts/sync-abis.mjs",
+    "abis:check": "node scripts/sync-abis.mjs --check",
     "dev": "tsup --watch",
     "prepack": "node scripts/prepack.mjs",
     "test": "vitest run",
@@ -63,9 +67,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "tsup": "^8.5.0",
+    "tsup": "^9.0.0",
     "typescript": "^5.8.3",
-    "viem": "^2.48.8",
+    "viem": "^2.57.11",
     "vitest": "^3.2.4"
   }
 }

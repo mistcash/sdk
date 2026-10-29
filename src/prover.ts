@@ -34,6 +34,7 @@ export function createWorkerProver(opts?: {
       ? new URL('../wasm/mist-webgpu.wasm', import.meta.url).href
       : new URL('../wasm/mist.wasm', import.meta.url).href;
   let _id = 0;
+  let terminated = false;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
   worker.onmessage = (e: MessageEvent) => {
@@ -47,6 +48,8 @@ export function createWorkerProver(opts?: {
 
   function call<T>(method: string, args: unknown[]): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      // The worker is gone, so nothing would ever answer: reject, don't hang.
+      if (terminated) return reject(new Error('prover worker terminated'));
       const id = _id++;
       pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       worker.postMessage({ id, method, args, wasmUrl: resolvedWasmUrl, ...(webgpu ? { webgpu } : {}) });
@@ -61,6 +64,7 @@ export function createWorkerProver(opts?: {
       call<{ keyIndex: number; plaintext: string[] } | null>('decrypt', [ukx, commitments]),
     backend: () => call<ProverInfo>('backend', []),
     terminate: () => {
+      terminated = true;
       const err = new Error('prover worker terminated');
       for (const p of pending.values()) p.reject(err);
       pending.clear();
