@@ -24,6 +24,7 @@
       "default": "./dist/prover.js"
     },
     "./mist.wasm": "./wasm/mist.wasm",
+    "./wasm/mist.wasm": "./wasm/mist.wasm",
     "./circuit.json": "./circuit.json",
     "./package.json": "./package.json"
   },

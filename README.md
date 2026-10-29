@@ -277,6 +277,12 @@ MIST_CORE=/path/to/core npm run abis         # regenerate src/abis.generated.ts
 
 See [CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full mirrored surface.
 
+## Releasing
+
+CI runs `npm run verify` on every PR, but the published package needs the
+vendored `wasm/mist.wasm`, which CI cannot fetch yet, so releases are manual.
+See [RELEASING.md](./RELEASING.md).
+
 ## Architecture
 
 - **`identity`**: `secretOf`, `ownerOf`, `rand` — pure, injected hash
