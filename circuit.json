@@ -1,19 +1,19 @@
 {
-  "sha256": "10daf4e14d937555bc6007ae9b29e369be55587cc654249ebd8dc3b112a751ce",
+  "sha256": "f82d994a2778421ef7a2c9689dde73f1ed9662a115c79e33092fba25029dcec2",
   "size": 16592850,
   "go": "go1.26.8",
   "gnark": "v0.16.4",
   "webgpu": {
-    "sha256": "d6f47793a5360c6aad21986d42875cf5a84571f110c926b361f9725c724fb724",
+    "sha256": "251e0905248306aed5e16beeca14d5fd22198a1f797aa009336ad9148c173394",
     "size": 17852810
   },
   "core": {
     "repo": "core",
-    "commit": "56baf15ed47c5d0785b4b6601985fd5828007bff"
+    "commit": "566337a97530ebdcfd716a841da7ed5ec5593eff"
   },
   "builtFrom": {
     "repo": "mist",
-    "commit": "0ef961422f8d96b5dc81d4f76312e2f095ef19d7"
+    "commit": "0504f158537ad108452eb037227daf1a1e1cbf57"
   },
-  "timestamp": "2026-10-20T07:37:07.801Z"
+  "timestamp": "2026-10-29T00:40:12.507Z"
 }
