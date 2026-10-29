@@ -29,6 +29,27 @@ if (actual !== circuit.sha256) {
 
 console.log('prepack: wasm/mist.wasm OK');
 
+// The WebGPU prover ships beside it, and its TypeScript half must come from
+// the same gnark: the bridge protocol between them is unversioned.
+const WEBGPU = resolve(ROOT, 'wasm/mist-webgpu.wasm');
+if (!existsSync(WEBGPU) || !circuit.webgpu) {
+  console.error('prepack: wasm/mist-webgpu.wasm or its circuit.json record missing — run npm run sync:wasm');
+  process.exit(1);
+}
+const webgpuActual = createHash('sha256').update(readFileSync(WEBGPU)).digest('hex');
+if (webgpuActual !== circuit.webgpu.sha256) {
+  console.error('prepack: wasm/mist-webgpu.wasm sha256 mismatch');
+  console.error(`  expected: ${circuit.webgpu.sha256}`);
+  console.error(`  actual:   ${webgpuActual}`);
+  process.exit(1);
+}
+const vendored = readFileSync(resolve(ROOT, 'src/prover/gnark-webgpu/version.ts'), 'utf-8').match(/GNARK_VERSION = "([^"]+)"/)?.[1];
+if (vendored !== circuit.gnark) {
+  console.error(`prepack: vendored gnark WebGPU runtime is ${vendored}, mist-webgpu.wasm links gnark ${circuit.gnark}`);
+  process.exit(1);
+}
+console.log(`prepack: wasm/mist-webgpu.wasm OK (gnark ${circuit.gnark})`);
+
 // A published wasm has to say which circuits it was built from: a proving key
 // is only valid against the verifier for that exact circuit, so "unknown" here
 // means nobody can tell what a consumer is trusting.

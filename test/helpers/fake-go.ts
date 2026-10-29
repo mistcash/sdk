@@ -30,12 +30,15 @@ export async function installFakeGo(options: {
   /** Which of the four exports `run()` should install. Missing ones trigger the
    *  `mist.wasm predates <key>` guard. */
   exports?: Partial<Record<ProverExport, AnyFn>>;
+  /** Further globals `run()` installs alongside them, e.g. mist-webgpu.wasm's
+   *  `prepareProver`. Restored like the four. */
+  extras?: Record<string, AnyFn>;
 } = {}): Promise<{ restore: () => void; runCalls: () => number }> {
   await import('../../src/prover/wasm_exec.js');
 
   const globals = globalThis as Record<string, unknown>;
   const saved = new Map<string, unknown>();
-  for (const key of PROVER_EXPORTS) saved.set(key, globals[key]);
+  for (const key of [...PROVER_EXPORTS, ...Object.keys(options.extras ?? {})]) saved.set(key, globals[key]);
   const savedGo = globals.Go;
 
   let runCalls = 0;
@@ -50,7 +53,7 @@ export async function installFakeGo(options: {
     importObject = {};
     run(_instance: WebAssembly.Instance): void {
       runCalls += 1;
-      for (const [key, value] of Object.entries(wanted)) {
+      for (const [key, value] of Object.entries({ ...wanted, ...options.extras })) {
         if (value !== undefined) globals[key] = value;
       }
     }

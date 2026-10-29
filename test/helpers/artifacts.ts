@@ -26,10 +26,21 @@ export const WASM_EXEC = OVERRIDE
 
 export const hasWasm = existsSync(WASM_FILE) && existsSync(WASM_EXEC);
 
+export const WEBGPU_WASM_FILE = OVERRIDE
+  ? resolve(OVERRIDE, 'mist-webgpu.wasm')
+  : resolve(ROOT, 'wasm/mist-webgpu.wasm');
+
+export const hasWebGPUWasm = existsSync(WEBGPU_WASM_FILE) && existsSync(WASM_EXEC);
+
 // Name only the artifacts that are actually absent: wasm_exec.js is committed,
 // so it is usually present even before a sync.
 export const missingWasm = [
   ...(!existsSync(WASM_FILE) ? [`mist.wasm not found at ${WASM_FILE}`] : []),
+  ...(!existsSync(WASM_EXEC) ? [`wasm_exec.js not found at ${WASM_EXEC}`] : []),
+].join('; ');
+
+export const missingWebGPUWasm = [
+  ...(!existsSync(WEBGPU_WASM_FILE) ? [`mist-webgpu.wasm not found at ${WEBGPU_WASM_FILE}`] : []),
   ...(!existsSync(WASM_EXEC) ? [`wasm_exec.js not found at ${WASM_EXEC}`] : []),
 ].join('; ');
 

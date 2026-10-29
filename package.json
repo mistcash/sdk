@@ -23,8 +23,14 @@
       "node": "./dist/prover.node.js",
       "default": "./dist/prover.js"
     },
+    "./prover/webgpu": {
+      "types": "./dist/prover.webgpu.d.ts",
+      "default": "./dist/prover.webgpu.js"
+    },
     "./mist.wasm": "./wasm/mist.wasm",
     "./wasm/mist.wasm": "./wasm/mist.wasm",
+    "./mist-webgpu.wasm": "./wasm/mist-webgpu.wasm",
+    "./wasm/mist-webgpu.wasm": "./wasm/mist-webgpu.wasm",
     "./circuit.json": "./circuit.json",
     "./package.json": "./package.json"
   },

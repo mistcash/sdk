@@ -22,6 +22,7 @@ then `handleZkp` reverts on-chain.
 | key index range `0..255` | `KeyIndexBits = 8` | `primary.go` |
 | `'mist/xwing/v1'`, `'mist/ukx/v1'` labels (`src/pq.ts`) | the manager and auditor tooling (`core-deploy/scripts/audit`, playground `pq.js`) | core-deploy |
 | `mist.wasm` + `wasm_exec.js` | the proving key behind the **deployed** `ChamberVerifier`; `wasm_exec.js` from the same Go toolchain that built the wasm | `core-deploy/scripts/build.sh` |
+| `mist-webgpu.wasm` + `src/prover/gnark-webgpu/` | the same key, built with `-tags webgpu`; the TypeScript runtime from the gnark that wasm links (`circuit.json` `gnark`) | `core-deploy/builders/wasm/go.mod` |
 
 ## When the circuit or contracts change
 
@@ -77,7 +78,7 @@ the ABIs.
    submodule commit the key was built from, and a timestamp. The tests read
    those same two vendored paths, so the six real-wasm tests actually run
    rather than skipping. Check the printed commits, then commit
-   `src/prover/wasm_exec.js` and `circuit.json`.
+   `src/prover/wasm_exec.js`, `src/prover/gnark-webgpu/` and `circuit.json`.
 
    `npm run verify` additionally typechecks, builds, and runs the packaging
    tests that assert the built `dist/` tree and the `exports` map.
@@ -104,3 +105,5 @@ the ABIs.
 - Mix `wasm_exec.js` from one Go version with a wasm built by another.
 - Hand-edit `src/abis.generated.ts`, or ship a release without a passing
   `npm run abis:check` against the `core` commit the release targets.
+- Update the vendored gnark WebGPU runtime apart from `mist-webgpu.wasm`.
+  `prepack` checks that `version.ts` matches `circuit.json`'s `gnark`.

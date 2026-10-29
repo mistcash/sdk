@@ -1,64 +1,38 @@
 export type { FullProverAdapter } from './prover-core.js';
 import { createLoader } from './prover-core.js';
+import { browserInstantiate } from './prover-browser.js';
 
-export const loadProver = createLoader(async (go, source) => {
-  if (source instanceof ArrayBuffer || source instanceof Uint8Array) {
-    const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
-    const result = await WebAssembly.instantiate(bytes as BufferSource, go.importObject) as WebAssembly.WebAssemblyInstantiatedSource;
-    return result.instance;
-  }
-  if (source instanceof Response) {
-    return instantiateFromResponse(source, go);
-  }
-  const url = source !== undefined ? String(source) : new URL('../wasm/mist.wasm', import.meta.url).href;
-  const res = await fetch(url).catch((cause: unknown) => {
-    throw new Error(
-      `could not fetch mist.wasm from ${url}: ${(cause as Error)?.message ?? String(cause)}. ` +
-      'If this is a bundled app, the default path is resolved at runtime and the asset may not ' +
-      'have been emitted — pass the URL your bundler gives you instead, e.g. ' +
-      "loadProver(new URL('@mistcash/sdk/wasm/mist.wasm', import.meta.url)) or, on Vite, " +
-      "loadProver((await import('@mistcash/sdk/wasm/mist.wasm?url')).default).",
-      { cause },
-    );
-  });
-  if (!res.ok) {
-    throw new Error(
-      `mist.wasm not served at ${url} (HTTP ${res.status}${(res.statusText ? ' ' + res.statusText : '')}). ` +
-      'Pass the wasm URL your bundler emits, or the bytes themselves, to loadProver().',
-    );
-  }
-  return instantiateFromResponse(res, go);
-});
-
-async function instantiateFromResponse(
-  res: Response,
-  go: { importObject: WebAssembly.Imports },
-): Promise<WebAssembly.Instance> {
-  if (typeof WebAssembly.instantiateStreaming === 'function' &&
-      res.headers?.get('Content-Type') === 'application/wasm') {
-    const result = await WebAssembly.instantiateStreaming(res, go.importObject);
-    return result.instance;
-  }
-  const buf = await res.arrayBuffer();
-  const result = await WebAssembly.instantiate(buf, go.importObject);
-  return result.instance;
-}
+export const loadProver = createLoader(
+  browserInstantiate('mist.wasm', 'loadProver', () => new URL('../wasm/mist.wasm', import.meta.url).href),
+);
 
 import type { SpendResult } from './proving.js';
+import type { ProverInfo } from './prover-core.js';
 
-export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
+export function createWorkerProver(opts?: {
+  wasmUrl?: string | URL;
+  /** Prove with mist-webgpu.wasm on the GPU (see `@mistcash/sdk/prover/webgpu`),
+   * falling back to the CPU inside the worker when WebGPU is unusable there.
+   * `wasmUrl` must then point at mist-webgpu.wasm. */
+  webgpu?: boolean;
+}): {
   hash2: (a: string, b: string) => Promise<string>;
   hash3: (a: string, b: string, c: string) => Promise<string>;
   spend: (json: string) => Promise<SpendResult>;
   decrypt: (ukx: string, commitments: string[]) => Promise<{ keyIndex: number; plaintext: string[] } | null>;
+  /** Where the worker's proofs run, and why not on the GPU if it asked for one. */
+  backend: () => Promise<ProverInfo>;
   /** Stop the worker and reject anything still in flight. Without this the
    * worker (and its 16MB wasm) stays alive for the page's lifetime. */
   terminate: () => void;
 } {
   const worker = new Worker(new URL('./prover-worker.js', import.meta.url), { type: 'module' });
+  const webgpu = opts?.webgpu === true;
   const resolvedWasmUrl = opts?.wasmUrl !== undefined
     ? String(opts.wasmUrl)
-    : new URL('../wasm/mist.wasm', import.meta.url).href;
+    : webgpu
+      ? new URL('../wasm/mist-webgpu.wasm', import.meta.url).href
+      : new URL('../wasm/mist.wasm', import.meta.url).href;
   let _id = 0;
   let terminated = false;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -78,7 +52,7 @@ export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
       if (terminated) return reject(new Error('prover worker terminated'));
       const id = _id++;
       pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      worker.postMessage({ id, method, args, wasmUrl: resolvedWasmUrl });
+      worker.postMessage({ id, method, args, wasmUrl: resolvedWasmUrl, ...(webgpu ? { webgpu } : {}) });
     });
   }
 
@@ -88,6 +62,7 @@ export function createWorkerProver(opts?: { wasmUrl?: string | URL }): {
     spend: (json: string) => call<SpendResult>('spend', [json]),
     decrypt: (ukx: string, commitments: string[]) =>
       call<{ keyIndex: number; plaintext: string[] } | null>('decrypt', [ukx, commitments]),
+    backend: () => call<ProverInfo>('backend', []),
     terminate: () => {
       terminated = true;
       const err = new Error('prover worker terminated');
