@@ -197,6 +197,15 @@ const prover = await loadWebGPUProver(); // or a URL / bytes, as for loadProver
 prover.backend; // 'webgpu', or 'cpu' with prover.fallbackReason
 ```
 
+When bundling, pass the URL your bundler emits, exactly as for `mist.wasm`
+(see [Loading `mist.wasm`](#loading-mistwasm)):
+
+```ts
+// Vite
+import webgpuWasmUrl from '@mistcash/sdk/wasm/mist-webgpu.wasm?url';
+const prover = createWorkerProver({ webgpu: true, wasmUrl: webgpuWasmUrl });
+```
+
 It never fails for want of a GPU: with no `navigator.gpu`, no adapter, or a
 failed upload, the same wasm proves on the CPU and `backend` says `'cpu'`.
 Check `hasWebGPU()` first if you would rather load the smaller `mist.wasm`
@@ -320,7 +329,8 @@ See [CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full mirrored surface.
 ## Releasing
 
 CI runs `npm run verify` on every PR, but the published package needs the
-vendored `wasm/mist.wasm`, which CI cannot fetch yet, so releases are manual.
+vendored `wasm/mist.wasm` and `wasm/mist-webgpu.wasm`, which CI cannot fetch
+yet, so releases are manual.
 See [RELEASING.md](./RELEASING.md).
 
 ## Architecture
