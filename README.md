@@ -10,12 +10,9 @@ Extracted from `core-deploy/playground` (`chain.js`, `pq.js`, `app.js` flows).
 npm install @mistcash/sdk viem
 ```
 
-Contributors: after cloning, sync the prover artifacts from core-deploy:
-
-```bash
-npm run sync:wasm    # copies mist.wasm + wasm_exec.js, writes circuit.json
-npm test             # verify
-```
+Contributors: the prover wasm is committed under `wasm/`, so a fresh clone
+runs as-is (`npm ci && npm test`). After a circuit change, resync it from
+core-deploy with `npm run sync:wasm` (see [Circuit sync](#circuit-sync)).
 
 ## Quick start (Node)
 
@@ -328,10 +325,8 @@ See [CIRCUIT_SYNC.md](./CIRCUIT_SYNC.md) for the full mirrored surface.
 
 ## Releasing
 
-CI runs `npm run verify` on every PR, but the published package needs the
-vendored `wasm/mist.wasm` and `wasm/mist-webgpu.wasm`, which CI cannot fetch
-yet, so releases are manual.
-See [RELEASING.md](./RELEASING.md).
+CI runs `npm run verify`, real-wasm tests included, on every PR. Pushing a
+`vX.Y.Z` tag publishes to npm from CI. See [RELEASING.md](./RELEASING.md).
 
 ## Architecture
 
