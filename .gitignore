@@ -3,9 +3,8 @@ node_modules
 .pnp
 .pnp.js
 
-# Build outputs
+# Build outputs (wasm/ is tracked: core-deploy is private, so CI cannot build it)
 dist
-wasm
 coverage
 
 # Prover artifacts staged by hand for MIST_WASM_DIR runs
