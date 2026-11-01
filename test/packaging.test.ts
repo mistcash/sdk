@@ -24,10 +24,9 @@ const importDist = (name: string) => import(/* @vite-ignore */ pathToFileURL(dis
 
 describe('packaging', () => {
   it.skipIf(!distExists)('ships every entry point the exports map advertises', async () => {
-    // Two different invariants, and conflating them makes this fail on a fresh
-    // clone: build outputs must exist here and now, while the vendored wasm is
-    // gitignored and only present after `npm run sync:wasm`. What actually
-    // matters for the tarball is that the wasm is *covered by* `files`.
+    // Two different invariants: build outputs must exist here and now, while
+    // the vendored wasm (tracked in git, refreshed by `npm run sync:wasm`) only
+    // has to be *covered by* `files` for the tarball to ship it.
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
       exports: Record<string, unknown>;
       files: string[];
