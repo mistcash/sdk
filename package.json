@@ -1,6 +1,6 @@
 {
   "name": "@mistcash/sdk",
-  "version": "0.6.0",
+  "version": "0.6.0-beta1",
   "description": "Modular TypeScript SDK for MIST private payments on EVM. Extracted from core-deploy/playground.",
   "license": "MIT",
   "type": "module",
