@@ -24,7 +24,7 @@ import { createPublicClient, createWalletClient, http, keccak256, parseAbi } fro
 import { privateKeyToAccount } from 'viem/accounts';
 import { anvil } from 'viem/chains';
 import { loadProver } from '@mistcash/sdk/prover';
-import { CORE_ABI, MistClient, rand, type AddressBook, type ChainAdapter } from '@mistcash/sdk';
+import { CORE_ABI, MistClient, decapsulate, deriveUkx, managerKeys, rand, type AddressBook, type ChainAdapter } from '@mistcash/sdk';
 
 const PRIVATE_KEY = '0x...';
 const account = privateKeyToAccount(PRIVATE_KEY);
@@ -61,6 +61,23 @@ const client = new MistClient({
   addressOf: () => account.address,
   // Testing only: real apps derive the secret from a wallet signature (see Caveats).
   secretOf: () => (BigInt(keccak256(PRIVATE_KEY)) >> 8n).toString(),
+});
+
+// Join the reserve: a reserve with members only lets members spend. The
+// manager's half (decapsulate, sign the membership leaf) normally runs in the
+// reserve manager's service; here the deployer is the manager, as on a local
+// core deploy (contracts/script/Deploy.s.sol).
+const manager = managerKeys(PRIVATE_KEY);
+await client.join({
+  id: 'me (MIST)',
+  reserve: book.reserve,
+  managerPublicKey: manager.publicKey,
+  managerSide: async ({ cipherText, reserve, mistAddr }) => {
+    const ukx = deriveUkx(decapsulate(cipherText, manager.secretKey), reserve, mistAddr);
+    const leaf = BigInt(await prover.hash2(mistAddr, ukx)); // H2(mistAddr, ukx); the ukx stays off-chain
+    const digest = await publicClient.readContract({ address: book.registrar, abi, functionName: 'registerUserDigest', args: [reserve, leaf] });
+    return { ukx, signature: await account.sign({ hash: digest }) }; // EIP-712, by the reserve manager
+  },
 });
 
 // Deposit into a private note, then withdraw it back to the public account.
