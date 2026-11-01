@@ -59,8 +59,16 @@ jobs:
             exit 1
           fi
 
+      # A prerelease (v0.6.0-beta.1) goes to the dist-tag named by its first
+      # identifier (beta), never to `latest`: npm 10 would otherwise make it
+      # what `npm install @mistcash/sdk` resolves to, and npm 11 refuses.
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          tag=latest
+          case "$version" in *-*) pre="${version#*-}"; tag="${pre%%.*}" ;; esac
+          echo "Publishing $version under dist-tag '$tag'"
+          npm publish --provenance --access public --tag "$tag"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
