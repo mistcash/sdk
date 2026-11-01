@@ -30,11 +30,11 @@ describe('mist-webgpu.wasm integration', () => {
 
   it.skipIf(!hasWebGPUWasm)('hashes like mist.wasm', async () => {
     if (!prover) throw new Error('wasm not loaded');
-    // Poseidon2 H2(1, 2) and H3(1, 2, 3), as mist.wasm computes them.
+    // Poseidon2 H2(1, 2) and H3(1, 2, 3) at (RF=8, RP=56), as mist.wasm computes them.
     expect(await prover.hash2('1', '2'))
-      .toBe('1313337560616139085277676701856612540166622156368305732529371734734451176752');
+      .toBe('14764600645593062425721213299093111352854594494516189496930284874052842801156');
     expect(await prover.hash3('1', '2', '3'))
-      .toBe('21494926133697984799302429478475428578106379390114807142496044705635584111635');
+      .toBe('16327479375846628511410017750205405196956758638813804284284368717901838126844');
   });
 
   it.skipIf(!hasWebGPUWasm)('spend returns a promise that reaches the circuit', async () => {
