@@ -4,13 +4,13 @@
 // (`MistCallbacks`) are all injected — set `sendTransaction` to route MIST
 // spends through a relayer while public spends go direct.
 
-import { decodeEventLog, encodeAbiParameters, encodeFunctionData, parseAbiParameters } from 'viem';
+import { decodeEventLog, encodeFunctionData } from 'viem';
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, randomKeyIndex, type ProverAdapter, type SpendRequest } from './proving.js';
 import { deriveUkx, encapsulate } from './pq.js';
 import type { AddressBook } from './contracts.js';
-import { chamberAbi, erc20Abi, reserveAbi } from './abis.generated.js';
+import { chamberAbi, erc20Abi, managerSigRegistrarAbi, reserveAbi } from './abis.generated.js';
 import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDeposit, StorageAdapter, TxReceipt } from './types.js';
 
 /** Single store key holding the per-ukx used key-index map. */
@@ -381,9 +381,17 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   // ── Membership (X-Wing join) ─────────────────────────────────────────────
 
   /**
-   * Join a reserve through an X-Wing key exchange, then `registerUser`.
-   * The manager's decapsulation runs wherever the host provides it via
-   * `managerSide` (this tab plays both sides in the playground).
+   * Join a reserve through an X-Wing key exchange, then register the
+   * membership leaf `H2(mistAddr, ukx)` through `book.registrar`
+   * (`ManagerSigRegistrar.registerUser(reserve, leaf, signature)`, which calls
+   * `Reserve.addUser`).
+   *
+   * `managerSide` runs the manager's half wherever the host provides it (this
+   * tab plays both sides in the playground): decapsulate `cipherText`, derive
+   * the same ukx, compute `leaf = H2(mistAddr, ukx)`, and sign the EIP-712
+   * digest `registrar.registerUserDigest(reserve, leaf)` with the reserve
+   * manager's key (65-byte `r ++ s ++ v`). The ukx never goes on-chain: only
+   * the leaf does.
    */
   async join(opts: {
     id: string;
@@ -399,8 +407,12 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     const { ukx: managerUkx, signature } = opts.managerSide({ cipherText, reserve, mistAddr });
     if (ukx !== managerUkx) throw new Error('Client and manager derived different ukx values');
     this.progress('Registering');
-    const data = encodeAbiParameters(parseAbiParameters('uint256, uint256, bytes'), [BigInt(mistAddr), BigInt(ukx), signature]);
-    await this.write(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'registerUser', args: [data] }), 'registerUser');
+    const leaf = BigInt(await this.prover.hash2(mistAddr, ukx));
+    await this.write(
+      this.book.registrar,
+      encodeFunctionData({ abi: managerSigRegistrarAbi, functionName: 'registerUser', args: [reserve, leaf, signature] }),
+      'registerUser',
+    );
     this.ukx[`${reserve}:${mistAddr}`] = ukx;
     return { ukx };
   }
@@ -438,11 +450,14 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     return receipt;
   }
 
-  async setCallback(reserve: Hex, selector: Hex): Promise<TxReceipt> {
+  /**
+   * Let `registrar` add members to `reserve` (`Reserve.setRegistrar`; reserve
+   * manager only). Defaults to `book.registrar`, the ManagerSigRegistrar that
+   * `join` registers through. The zero address closes registration.
+   */
+  async setRegistrar(reserve: Hex, registrar: Hex = this.book.registrar): Promise<TxReceipt> {
     const { receipt } = await this.write(
-      reserve,
-      encodeFunctionData({ abi: reserveAbi, functionName: 'setRegisterUserCallback', args: [this.book.registrar, selector] }),
-      'setRegisterUserCallback',
+      reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'setRegistrar', args: [registrar] }), 'setRegistrar',
     );
     return receipt;
   }

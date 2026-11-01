@@ -6,8 +6,9 @@
 // fails here instead of on-chain.
 
 import { describe, expect, it, vi } from 'vitest';
-import { decodeAbiParameters, decodeFunctionData, parseAbiParameters } from 'viem';
+import { decodeFunctionData } from 'viem';
 import { MistClient, type SpendOpts } from '../src/client.js';
+import { OWNER_KEYWORD } from '../src/identity.js';
 import { decapsulate, deriveUkx, managerKeys } from '../src/pq.js';
 import type { ProverAdapter } from '../src/proving.js';
 import type { ChainAdapter, Hex, MistCallbacks, StorageAdapter } from '../src/types.js';
@@ -39,9 +40,12 @@ const CHAMBER_MIN = [
 ] as const;
 
 const RESERVE_MIN = [
-  { type: 'function', name: 'registerUser', stateMutability: 'nonpayable', inputs: [{ name: 'data', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'setRegisterUserCallback', stateMutability: 'nonpayable', inputs: [{ name: 'target', type: 'address' }, { name: 'entrypoint', type: 'bytes4' }], outputs: [] },
+  { type: 'function', name: 'setRegistrar', stateMutability: 'nonpayable', inputs: [{ name: 'registrar', type: 'address' }], outputs: [] },
   { type: 'function', name: 'updateAuditorKey', stateMutability: 'nonpayable', inputs: [{ name: 'keyHash', type: 'uint256' }, { name: 'keyInputPoint', type: 'uint256' }], outputs: [] },
+] as const;
+
+const REGISTRAR_MIN = [
+  { type: 'function', name: 'registerUser', stateMutability: 'nonpayable', inputs: [{ name: 'reserve', type: 'address' }, { name: 'leaf', type: 'uint256' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
 ] as const;
 
 // What the client hands the prover. `serializeSpendRequest` emits bigints as
@@ -165,13 +169,17 @@ function fixedState(overrides: Partial<NonNullable<SpendOpts['state']>> = {}): N
 describe('MistClient flows', () => {
   // ── join ─────────────────────────────────────────────────────────────────
 
-  it('join derives a shared ukx, registers it, and records the exchange', async () => {
+  it('join derives a shared ukx, registers its leaf through the registrar, and records the exchange', async () => {
     // A round trip through real X-Wing: only a manager holding the matching
     // secret key can agree on the ukx the client registers.
     const manager = managerKeys('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
     const { chain, sent } = mockChain();
     const onProgress = vi.fn();
-    const client = makeClient({ chain, callbacks: { onProgress } });
+    // Owner derivation H2(secret, "owner") -> MIST_ADDR; any other H2 is the
+    // membership leaf, given a distinct value so a mixed-up argument shows.
+    const LEAF = '777';
+    const hash2 = vi.fn((_a: string, b: string) => (b === OWNER_KEYWORD ? MIST_ADDR : LEAF));
+    const client = makeClient({ chain, callbacks: { onProgress }, prover: { ...mockProver().prover, hash2 } });
     const managerSide = vi.fn(
       (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) => ({
         ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
@@ -187,19 +195,16 @@ describe('MistClient flows', () => {
     });
 
     expect(managerSide).toHaveBeenCalledWith({ cipherText: expect.any(Uint8Array), reserve: BOOK.reserve, mistAddr: MIST_ADDR });
+    expect(hash2).toHaveBeenCalledWith(MIST_ADDR, ukx);
     expect(sent).toHaveLength(1);
-    expect(sent[0].to).toBe(BOOK.reserve);
-    const call = decodeFunctionData({ abi: RESERVE_MIN, data: sent[0].data });
+    // Registration goes to the registrar, which calls Reserve.addUser.
+    expect(sent[0].to).toBe(BOOK.registrar);
+    const call = decodeFunctionData({ abi: REGISTRAR_MIN, data: sent[0].data });
     expect(call.functionName).toBe('registerUser');
-    // The blob is (mistAddr, ukx, signature): swapping the two uint256s would
-    // register the member under the wrong key with no client-side error.
-    const [mistAddr, registeredUkx, signature] = decodeAbiParameters(
-      parseAbiParameters('uint256, uint256, bytes'),
-      (call.args as readonly [Hex])[0],
-    );
-    expect(mistAddr).toBe(BigInt(MIST_ADDR));
-    expect(registeredUkx).toBe(BigInt(ukx));
-    expect(signature).toBe('0xbeef');
+    // (reserve, leaf = H2(mistAddr, ukx), manager signature over that leaf).
+    expect(call.args).toEqual([BOOK.reserve, BigInt(LEAF), '0xbeef']);
+    // The ukx must never reach the chain: it derives every private tx key.
+    expect(sent[0].data.toLowerCase()).not.toContain(BigInt(ukx).toString(16).padStart(64, '0'));
     expect(client.ukx[`${BOOK.reserve}:${MIST_ADDR}`]).toBe(ukx);
     expect(onProgress.mock.calls.map((c) => c[0])).toEqual(['Exchanging keys', 'Registering']);
   });
@@ -610,18 +615,27 @@ describe('MistClient flows', () => {
     expect(call.args).toEqual([BOOK.verifier]);
   });
 
-  it('setCallback pins target before entrypoint', async () => {
-    // The pair is (registrar target, bytes4 entrypoint): swapped arguments
-    // would point the callback at garbage, and both are plain words on-chain.
+  it('setRegistrar points the reserve at book.registrar by default', async () => {
     const { chain, sent } = mockChain();
     const client = makeClient({ chain });
 
-    await client.setCallback(BOOK.reserve, '0x12345678');
+    await client.setRegistrar(BOOK.reserve);
 
     expect(sent[0].to).toBe(BOOK.reserve);
     const call = decodeFunctionData({ abi: RESERVE_MIN, data: sent[0].data });
-    expect(call.functionName).toBe('setRegisterUserCallback');
-    expect(call.args).toEqual([BOOK.registrar, '0x12345678']);
+    expect(call.functionName).toBe('setRegistrar');
+    expect(call.args).toEqual([BOOK.registrar]);
+  });
+
+  it('setRegistrar takes another registrar, or zero to close registration', async () => {
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+    const zero = '0x0000000000000000000000000000000000000000' as Hex;
+
+    await client.setRegistrar(BOOK.reserve, zero);
+
+    const call = decodeFunctionData({ abi: RESERVE_MIN, data: sent[0].data });
+    expect(call.args).toEqual([zero]);
   });
 
   it('updateAuditorKey pins keyHash before keyInputPoint', async () => {
