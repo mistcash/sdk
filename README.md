@@ -7,8 +7,11 @@ Extracted from `core-deploy/playground` (`chain.js`, `pq.js`, `app.js` flows).
 ## Install
 
 ```bash
-npm install @mistcash/sdk viem
+npm install @mistcash/sdk@beta viem
 ```
+
+`0.6` is a rewrite and ships on the `beta` tag; `latest` (`0.5.x`) is the
+legacy SDK with a different API.
 
 Contributors: the prover wasm is committed under `wasm/`, so a fresh clone
 runs as-is (`npm ci && npm test`). After a circuit change, resync it from
@@ -17,52 +20,58 @@ core-deploy with `npm run sync:wasm` (see [Circuit sync](#circuit-sync)).
 ## Quick start (Node)
 
 ```ts
-import { createPublicClient, createWalletClient, http, parseAbi, keccak256 } from 'viem';
+import { createPublicClient, createWalletClient, http, keccak256, parseAbi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { anvil } from 'viem/chains';
 import { loadProver } from '@mistcash/sdk/prover';
-import { MistClient, type ChainAdapter, type Hex } from '@mistcash/sdk';
+import { CORE_ABI, MistClient, rand, type AddressBook, type ChainAdapter } from '@mistcash/sdk';
 
-const account = privateKeyToAccount('0x...');
+const PRIVATE_KEY = '0x...';
+const account = privateKeyToAccount(PRIVATE_KEY);
 const publicClient = createPublicClient({ chain: anvil, transport: http() });
 const walletClient = createWalletClient({ chain: anvil, transport: http(), account });
 
-const CORE_ABI = parseAbi([
-  'function getTxArray() view returns (uint256[])',
-  'function reserveConfigs(address) view returns (uint256, uint256, uint256)',
-  'function registeredUsersCount(address) view returns (uint256)',
-  'function deposit(address, uint256, uint256, address) returns (uint256)',
-  'function handleZkp(uint256[8], uint256[14], uint256[])',
-  'event UserRegistered(uint256 indexed leaf, uint256 index, uint256 root)',
-]);
+// Every read, write and event MistClient uses: Chamber, Reserve, the
+// registrar, the token and deposit screening.
+const abi = parseAbi(CORE_ABI);
 
 const chain: ChainAdapter = {
-  readContract: (address, fn, args) =>
-    publicClient.readContract({ address, abi: CORE_ABI, functionName: fn as never, args: args as never }),
+  readContract: (address, functionName, args) =>
+    publicClient.readContract({ address, abi, functionName: functionName as never, args: args as never }),
   sendTransaction: async (tx) => {
     const hash = await walletClient.sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    const tx2 = await publicClient.getTransaction({ hash });
-    return { receipt: { transactionHash: hash, gasUsed: receipt.gasUsed }, result: null };
+    // Pass the logs through: deposit() reads DepositQueued from them.
+    return { hash, receipt: { transactionHash: hash, gasUsed: receipt.gasUsed, status: receipt.status, logs: receipt.logs } };
   },
   getEvents: (address, eventName, fromBlock) =>
-    publicClient.getLogs({ address, event: CORE_ABI.find((a) => a.type === 'event' && a.name === eventName) as never, fromBlock }),
+    publicClient.getLogs({ address, event: abi.find((i) => i.type === 'event' && i.name === eventName) as never, fromBlock }),
 };
 
-const prover = await loadProver(); // loads wasm/mist.wasm (Node: reads from disk)
+// Addresses from the deployment (core-deploy/dist/deployments/<chainId>.json).
+const book: AddressBook = { chamber: '0x...', registrar: '0x...', reserve: '0x...', token: '0x...', verifier: '0x...' };
+
+const prover = await loadProver(); // reads wasm/mist.wasm from disk in Node
 const client = new MistClient({
-  book: { chamber: '0x...', registrar: '0x...', reserve: '0x...', token: '0x...', verifier: '0x...' },
+  book,
   chainId: anvil.id,
   chain,
   prover,
-  secretOf: (id) => (BigInt(keccak256(account.privateKey)) >> 8n).toString(),
+  // `me` is the public account; `me (MIST)` its private MIST identity.
   addressOf: () => account.address,
+  // Testing only: real apps derive the secret from a wallet signature (see Caveats).
+  secretOf: () => (BigInt(keccak256(PRIVATE_KEY)) >> 8n).toString(),
 });
+
+// Deposit into a private note, then withdraw it back to the public account.
+const amount = 10n ** 18n; // amounts are uint64: see Caveats
+await client.deposit({ reserve: book.reserve, id: 'me (MIST)', amount, blinding: rand() });
+await client.spend({ id: 'me (MIST)', amount: 0n, withdraw: amount, withdrawTo: 'me', reserve: book.reserve });
 ```
 
 ## Loading `mist.wasm`
 
-`mist.wasm` is a ~16 MB proving key. `loadProver()` takes it from four
+`mist.wasm` (~20 MB) is the prover with its proving key embedded. `loadProver()` takes it from four
 kinds of source, and **which one you should pass is the only bundler-specific
 decision in this SDK**:
 
@@ -93,7 +102,7 @@ source, so a 404 reads as a 404 rather than a stack trace from inside the
 loader.
 
 Deliberately **not** supported: inlining the wasm as a base64 string in the
-JavaScript. It would add ~22 MB to every consumer's bundle, couple the wasm's
+JavaScript. It would add ~26 MB to every consumer's bundle, couple the wasm's
 cache lifetime to the JS bundle's (a circuit change would invalidate all of
 it), and force a full decode in memory instead of `instantiateStreaming`. If
 you need a self-contained bundle anyway, base64 it yourself and hand the
@@ -163,7 +172,7 @@ const prover = createWorkerProver(); // optional: { wasmUrl: '...' }
 // prover.hash2, spend, decrypt are now async (proxied over postMessage)
 const client = new MistClient({ /* ... */ prover });
 
-// The worker holds the 16MB proving key, so stop it when you are done with it.
+// The worker holds the ~20 MB prover, so stop it when you are done with it.
 // This also rejects any call still in flight.
 prover.terminate();
 ```
@@ -340,7 +349,7 @@ CI runs `npm run verify`, real-wasm tests included, on every PR. Pushing a
 - **`client`**: `MistClient` — stateful gateway (deposit, spend, join,
   openPayload, deposit screening)
 - **`prover`** (subpath): `loadProver`, `createWorkerProver` (returns
-  `terminate()`; without it the worker and its 16MB key live for the page's
+  `terminate()`; without it the worker and its ~20 MB prover live for the page's
   lifetime; `{ webgpu: true }` proves on the GPU)
 - **`prover/webgpu`** (subpath): `loadWebGPUProver`, `hasWebGPU`
 
