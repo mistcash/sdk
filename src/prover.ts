@@ -23,7 +23,7 @@ export function createWorkerProver(opts?: {
   /** Where the worker's proofs run, and why not on the GPU if it asked for one. */
   backend: () => Promise<ProverInfo>;
   /** Stop the worker and reject anything still in flight. Without this the
-   * worker (and its 16MB wasm) stays alive for the page's lifetime. */
+   * worker (and its ~20 MB wasm) stays alive for the page's lifetime. */
   terminate: () => void;
 } {
   const worker = new Worker(new URL('./prover-worker.js', import.meta.url), { type: 'module' });

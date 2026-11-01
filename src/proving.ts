@@ -1,6 +1,6 @@
 // Prover adapter extracted from `playground/app.js` (`spendNotes`) and
 // `playground/chain.js` (wasm bootstrapping).
-// The SDK never bundles `mist.wasm` (~12-16MB): hosts inject `spend`/`decrypt`
+// The SDK never bundles `mist.wasm` (~20 MB): hosts inject `spend`/`decrypt`
 // from their own loader (`core-deploy/js` `createMist`, a browser fetcher, or
 // a test mock) via `ProverAdapter`.
 
