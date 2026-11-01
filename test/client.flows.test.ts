@@ -209,6 +209,25 @@ describe('MistClient flows', () => {
     expect(onProgress.mock.calls.map((c) => c[0])).toEqual(['Exchanging keys', 'Registering']);
   });
 
+  it('join awaits an async managerSide (a remote manager service)', async () => {
+    const manager = managerKeys('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+
+    const { ukx } = await client.join({
+      id: 'alice (MIST)',
+      reserve: BOOK.reserve,
+      managerPublicKey: manager.publicKey,
+      managerSide: async (args) => ({
+        ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+        signature: '0xbeef' as Hex,
+      }),
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(client.ukx[`${BOOK.reserve}:${MIST_ADDR}`]).toBe(ukx);
+  });
+
   it('join refuses to register when the manager derives a different ukx', async () => {
     // The ukx equality check is the client's only defence against a
     // misbehaving manager: registering a mismatched pair would silently give

@@ -397,14 +397,16 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     id: string;
     reserve: Hex;
     managerPublicKey: Uint8Array;
-    managerSide: (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) => { ukx: string; signature: Hex };
+    /** The manager's half; usually a request to the reserve manager's service. */
+    managerSide: (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) =>
+      { ukx: string; signature: Hex } | Promise<{ ukx: string; signature: Hex }>;
   }): Promise<{ ukx: string }> {
     const { id, reserve } = opts;
     this.progress('Exchanging keys');
     const { cipherText, sharedSecret } = encapsulate(opts.managerPublicKey);
     const mistAddr = await this.ownerFor(id);
     const ukx = deriveUkx(sharedSecret, reserve, mistAddr);
-    const { ukx: managerUkx, signature } = opts.managerSide({ cipherText, reserve, mistAddr });
+    const { ukx: managerUkx, signature } = await opts.managerSide({ cipherText, reserve, mistAddr });
     if (ukx !== managerUkx) throw new Error('Client and manager derived different ukx values');
     this.progress('Registering');
     const leaf = BigInt(await this.prover.hash2(mistAddr, ukx));
