@@ -60,9 +60,9 @@ const CORE_SUBSET = [
   ]],
   ['Reserve', [
     'reserveManager', 'auditorKey', 'registeredUsersRoot', 'registeredUsersCount',
-    'setRegisterUserCallback', 'registerUserCallback', 'registerUser', 'updateAuditorKey',
+    'registrar', 'setRegistrar', 'updateAuditorKey',
   ]],
-  ['ManagerSigRegistrar', ['registerUserDigest']],
+  ['ManagerSigRegistrar', ['registerUser', 'registerUserDigest']],
   ['ERC20', ['symbol', 'balanceOf', 'approve', 'transfer']],
   ['Reserve', ['UserRegistered']],
 ];
