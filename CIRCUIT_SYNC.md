@@ -22,7 +22,7 @@ then `handleZkp` reverts on-chain.
 | key index range `0..255` | `KeyIndexBits = 8` | `primary.go` |
 | `'mist/xwing/v1'`, `'mist/ukx/v1'` labels (`src/pq.ts`) | the manager and auditor tooling (`core-deploy/scripts/audit`, playground `pq.js`) | core-deploy |
 | `mist.wasm` + `wasm_exec.js` | the proving key behind the **deployed** `ChamberVerifier`; `wasm_exec.js` from the same Go toolchain that built the wasm | `core-deploy/scripts/build.sh` |
-| `mist-webgpu.wasm` + `src/prover/gnark-webgpu/` | the same key, built with `-tags webgpu`; the TypeScript runtime from the gnark that wasm links (`circuit.json` `gnark`) | `core-deploy/builders/wasm/go.mod` |
+| `mist-webgpu.wasm` + `src/prover/gnark-webgpu/` | the same key, built with `-tags webgpu`; the TypeScript runtime from the gnark that wasm links (`circuit.json` `gnark`) | `core-deploy/go.mod` |
 
 ## When the circuit or contracts change
 
@@ -73,12 +73,16 @@ the ABIs.
    MIST_CORE_DEPLOY=/path/to/core-deploy npm run sync:wasm && npm test
    ```
 
-   This copies `mist.wasm` to `wasm/` and `wasm_exec.js` to `src/prover/`, then
-   writes `circuit.json` with the sha256, byte size, Go version, the `core`
-   submodule commit the key was built from, and a timestamp. The tests read
-   those same two vendored paths, so the six real-wasm tests actually run
-   rather than skipping. Check the printed commits, then commit
-   `src/prover/wasm_exec.js`, `src/prover/gnark-webgpu/` and `circuit.json`.
+   This copies `mist.wasm` and `mist-webgpu.wasm` to `wasm/`, `wasm_exec.js`
+   to `src/prover/` and gnark's WebGPU runtime to `src/prover/gnark-webgpu/`,
+   then writes `circuit.json` with both sha256s and sizes, the Go and gnark
+   versions, the `core` commit the key was built from, the `mist` commit it
+   was built in, and a timestamp. The tests read those same vendored paths,
+   so the real-wasm tests run rather than skip. Check the printed commits
+   (both should be merged commits on `main`), then commit `wasm/`,
+   `src/prover/wasm_exec.js`, `src/prover/gnark-webgpu/` and `circuit.json`
+   together. The wasm is tracked, so every resync adds ~21 MB (gzipped) to
+   the repo history: only resync when the circuit or gnark changed.
 
    `npm run verify` additionally typechecks, builds, and runs the packaging
    tests that assert the built `dist/` tree and the `exports` map.
@@ -89,12 +93,17 @@ the ABIs.
    core-deploy/scripts/deploy.sh flow
    ```
 
+   `deploy.sh` sources `core-deploy/.env` over your environment, so if that
+   file sets `RPC_URL` (a testnet) the flow runs **there**, not on anvil,
+   even when you pass `RPC_URL` yourself. Move `.env` aside first.
+
    and an SDK spend against anvil, once at a reserve with members and once at
    a reserve without.
 7. **Version it**: a new vk means old proofs fail against the new verifier,
    and new proofs fail against the old one. Treat that as a breaking release
-   (a minor bump while on 0.x), and note in the changelog which deployments,
-   by address book, the release targets.
+   (a minor bump while on 0.x), and add to the GitHub release notes (which
+   `release.yml` generates) the deployments, by address book, the release
+   targets.
 
 ## Never
 
