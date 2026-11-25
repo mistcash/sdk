@@ -285,7 +285,7 @@ export class MistClient {
     return open;
   }
 
-  /** Take back a pending or rejected deposit (depositor only). */
+  /** Take back a pending or rejected deposit: the depositor or its `refundTo` may call; `refundTo` is paid. */
   async reclaimDeposit(depositId: string | bigint): Promise<TxReceipt> {
     const { receipt } = await this.write(
       this.book.chamber,
@@ -327,14 +327,16 @@ export class MistClient {
 
   /**
    * Screener: approve queued deposits into the tx tree. `evidence` is a
-   * bytes32 commitment to the off-chain screening record. The batch
-   * reverts whole on any id that is no longer pending.
+   * bytes32 commitment to the off-chain screening record. Ids no longer
+   * pending are skipped, and a note already in a tx tree is rejected
+   * (`DepositDuplicateRejected`), so a mined batch does not mean every id
+   * was approved: `refreshScreening` reads the outcome.
    */
   async approveDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
     return this.decide('approveDeposits', depositIds, evidence);
   }
 
-  /** Screener: reject queued deposits (final; depositors can reclaim). */
+  /** Screener: reject queued deposits (final; they can still be reclaimed). Ids no longer pending are skipped. */
   async rejectDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
     return this.decide('rejectDeposits', depositIds, evidence);
   }
