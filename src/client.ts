@@ -4,7 +4,7 @@
 // (`MistCallbacks`) are all injected — set `sendTransaction` to route MIST
 // spends through a relayer while public spends go direct.
 
-import { decodeEventLog, encodeFunctionData } from 'viem';
+import { decodeEventLog, encodeFunctionData, isAddressEqual } from 'viem';
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, randomKeyIndex, type ProverAdapter, type SpendRequest } from './proving.js';
@@ -12,6 +12,9 @@ import { deriveUkx, encapsulate } from './pq.js';
 import { RESERVE_ROLES, type AddressBook, type ReserveRole } from './contracts.js';
 import { chamberAbi, erc20Abi, managerSigRegistrarAbi, reserveAbi } from './abis.generated.js';
 import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDeposit, StorageAdapter, TxReceipt } from './types.js';
+
+/** Where a deposit's note went: its hash, and its tx index or screening deposit id. */
+type Placement = Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'>;
 
 /** Single store key holding the per-ukx used key-index map. */
 const KEY_INDICES_KEY = 'mist:keyIndices';
@@ -190,9 +193,7 @@ export class MistClient {
     const args = [reserve, commitment, amount, this.book.token] as const;
     const { receipt, result } = await this.write(
       this.book.chamber,
-      refundTo
-        ? encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args: [...args, refundTo] })
-        : encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args }),
+      encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args: refundTo ? [...args, refundTo] : args }),
       'deposit',
     );
     const placed = this.depositOutcome(reserve, receipt, result);
@@ -225,11 +226,11 @@ export class MistClient {
    * deposit's event from a receipt that holds others, and stands in for
    * missing logs.
    */
-  private depositOutcome(reserve: Hex, receipt: TxReceipt, result: unknown): Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'> | undefined {
+  private depositOutcome(reserve: Hex, receipt: TxReceipt, result: unknown): Placement | undefined {
     const [hash, depositId] = Array.isArray(result) && result.length === 2 ? result.map(String) : [];
-    const found: Array<Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'>> = [];
+    const found: Placement[] = [];
     for (const { eventName, args } of this.chamberEvents(receipt)) {
-      if (eventName === 'DepositQueued' && args.reserve.toLowerCase() === reserve.toLowerCase()) {
+      if (eventName === 'DepositQueued' && isAddressEqual(args.reserve, reserve)) {
         found.push({ hash: String(args.noteHash), screening: 'pending', depositId: String(args.depositId) });
       }
       if (eventName === 'NoteAppended') found.push({ hash: String(args.note), txIndex: Number(args.index) });
@@ -281,13 +282,15 @@ export class MistClient {
    */
   async refreshScreening(notes: Note[] = this.notes): Promise<Note[]> {
     const open = notes.filter((x) => x.depositId && (x.screening === 'pending' || x.screening === 'rejected'));
-    for (const note of open) {
-      const { status } = await this.pendingDeposit(note.depositId!);
-      if (status !== 'none') note.screening = status;
-      // Rejection is final: a rejected deposit leaves the queue only by reclaim.
-      else if (note.screening !== 'rejected' && (await this.locate(note))) delete note.screening;
-      else note.screening = 'reclaimed';
-    }
+    await Promise.all(
+      open.map(async (note) => {
+        const { status } = await this.pendingDeposit(note.depositId!);
+        if (status !== 'none') note.screening = status;
+        // Rejection is final: a rejected deposit leaves the queue only by reclaim.
+        else if (note.screening !== 'rejected' && (await this.locate(note))) delete note.screening;
+        else note.screening = 'reclaimed';
+      }),
+    );
     return open;
   }
 
@@ -308,12 +311,7 @@ export class MistClient {
    * reserve's SCREENING permission.
    */
   async setReserveScreener(reserve: Hex, screener: Hex): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      reserve,
-      encodeFunctionData({ abi: reserveAbi, functionName: 'setScreener', args: [screener] }),
-      'setScreener',
-    );
-    return receipt;
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'setScreener', args: [screener] }), 'setScreener');
   }
 
   /**
@@ -352,19 +350,14 @@ export class MistClient {
     depositIds: Array<string | bigint>,
     evidence: Hex,
   ): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName, args: [depositIds.map(BigInt), evidence] }),
-      functionName,
-    );
-    return receipt;
+    return this.send(this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName, args: [depositIds.map(BigInt), evidence] }), functionName);
   }
 
   /** The Chamber events in `receipt`, in log order. */
   private chamberEvents(receipt: TxReceipt) {
     const events = [];
     for (const log of receipt.logs ?? []) {
-      if (log.address.toLowerCase() !== this.book.chamber.toLowerCase()) continue;
+      if (!isAddressEqual(log.address, this.book.chamber)) continue;
       try {
         events.push(decodeEventLog({ abi: chamberAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] }));
       } catch {
@@ -383,11 +376,14 @@ export class MistClient {
     const amount = opts.amount + (opts.withdraw ?? 0n);
     if ((opts.withdraw ?? 0n) > 0n && !opts.withdrawTo) throw new Error('withdrawTo is required for withdrawals');
     if (await this.chain.readContract(this.book.chamber, 'spendsPaused')) throw new Error('Spends are paused.');
-    // Fetched state proves against the selected notes' own tx tree; injected
-    // state brings its own leaves.
-    const txTreeCapacity = opts.state ? undefined : await this.txTreeCapacity();
-    if (!opts.state) await Promise.all(unspent(notes, reserve, opts.id).map((n) => this.locate(n)));
-    const st = opts.state ?? (await this.spendState(reserve, opts.id));
+    // Fetched state proves against the selected notes' own tx tree, so it
+    // needs each note's index; injected state brings its own leaves.
+    const fetched = !opts.state;
+    const [txTreeCapacity, st] = await Promise.all([
+      fetched ? this.txTreeCapacity() : undefined,
+      opts.state ?? this.spendState(reserve, opts.id),
+      fetched && Promise.all(unspent(notes, reserve, opts.id).map((n) => this.locate(n))),
+    ]);
     const isMember = await this.isMember(reserve, opts.id);
     const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember, notes, txTreeCapacity });
     if ('error' in p) throw new Error(p.error);
@@ -716,16 +712,12 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     };
   }
 
-  /** Chamber's tx tree capacity (4^10 in production); read once, retried after a failure. */
-  private txTreeCapacity(): Promise<number> {
-    this.capacity ??= this.chain.readContract(this.book.chamber, 'txTreeCapacity').then(Number, (e: unknown) => {
-      this.capacity = undefined;
-      throw e;
-    });
-    return this.capacity;
-  }
+  private capacity?: number;
 
-  private capacity?: Promise<number>;
+  /** Chamber's tx tree capacity (4^10 in production); kept once read. */
+  private async txTreeCapacity(): Promise<number> {
+    return (this.capacity ??= Number(await this.chain.readContract(this.book.chamber, 'txTreeCapacity')));
+  }
 
   /**
    * Set `note.txIndex` from its hash (`Chamber.noteIndexPlusOne`) when
@@ -750,7 +742,8 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
       this.chain.readContract(this.book.chamber, 'txCount').then((n) => BigInt(n as bigint)),
     ]);
     const start = BigInt(treeId) * BigInt(capacity);
-    const end = count < start + BigInt(capacity) ? count : start + BigInt(capacity);
+    const treeEnd = start + BigInt(capacity);
+    const end = count < treeEnd ? count : treeEnd;
     const pages: Array<[bigint, bigint]> = [];
     for (let at = start; at < end; at += TX_PAGE) pages.push([at, end - at < TX_PAGE ? end - at : TX_PAGE]);
     const leaves: string[] = [];

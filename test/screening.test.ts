@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, parseAbi } from 'viem';
+import { decodeFunctionData, parseAbi } from 'viem';
 import { MistClient } from '../src/client.js';
 import { SCREENING_ABI } from '../src/contracts.js';
-import { chamberAbi } from '../src/abis.generated.js';
 import type { ChainAdapter, Hex, SentTx } from '../src/types.js';
+import { depositQueuedLog, noteAppendedLog } from './helpers/chamber-logs.js';
 
 const BOOK = {
   chamber: '0x1111111111111111111111111111111111111111' as Hex,
@@ -18,29 +18,11 @@ const NOTE = 4242n;
 const SCREENING = parseAbi(SCREENING_ABI);
 
 /** A DepositQueued log as the Chamber emits it. */
-function queuedLog(depositId: bigint, address: Hex = BOOK.chamber) {
-  return {
-    address,
-    topics: encodeEventTopics({
-      abi: SCREENING,
-      eventName: 'DepositQueued',
-      args: { depositId, reserve: BOOK.reserve, depositor: ME },
-    }) as Hex[],
-    data: encodeAbiParameters(
-      [{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }],
-      [NOTE, BOOK.token, 100n],
-    ),
-  };
-}
+const queuedLog = (depositId: bigint, address: Hex = BOOK.chamber) =>
+  depositQueuedLog(address, { depositId, noteHash: NOTE, reserve: BOOK.reserve, depositor: ME, asset: BOOK.token, amount: 100n });
 
 /** A NoteAppended log: what an unscreened deposit emits instead. */
-function appendedLog(index: bigint) {
-  return {
-    address: BOOK.chamber,
-    topics: encodeEventTopics({ abi: chamberAbi, eventName: 'NoteAppended', args: { index, note: NOTE } }) as Hex[],
-    data: encodeAbiParameters([{ type: 'uint256' }], [1n]),
-  };
-}
+const appendedLog = (index: bigint) => noteAppendedLog(BOOK.chamber, index, NOTE);
 
 /** Chain with one screened reserve and a mutable queue/tree. */
 function screenedChain(opts: { screener?: Hex; queue?: Record<string, number>; tree?: bigint[]; reverts?: boolean } = {}) {

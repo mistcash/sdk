@@ -6,7 +6,7 @@
 // fails here instead of on-chain.
 
 import { describe, expect, it, vi } from 'vitest';
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, parseAbi } from 'viem';
+import { decodeFunctionData, getAddress, parseAbi } from 'viem';
 import { MistClient, type SpendOpts } from '../src/client.js';
 import { CORE_ABI, RESERVE_ROLES } from '../src/contracts.js';
 import { chamberAbi, erc20Abi, managerSigRegistrarAbi, reserveAbi } from '../src/abis.generated.js';
@@ -14,6 +14,7 @@ import { OWNER_KEYWORD } from '../src/identity.js';
 import { decapsulate, deriveUkx, managerKeys } from '../src/pq.js';
 import type { ProverAdapter } from '../src/proving.js';
 import type { ChainAdapter, Hex, MistCallbacks, StorageAdapter } from '../src/types.js';
+import { depositQueuedLog, noteAppendedLog, type Log } from './helpers/chamber-logs.js';
 
 const BOOK = {
   chamber: '0x1111111111111111111111111111111111111111' as Hex,
@@ -78,25 +79,10 @@ const CORE_NAMES = (type: string) => new Set(CORE.filter((i) => i.type === type)
 const CORE_FUNCTIONS = CORE_NAMES('function');
 const CORE_EVENTS = CORE_NAMES('event');
 
-type Log = { address: Hex; topics: Hex[]; data: Hex };
+const appendedLog = (index: bigint, note: bigint, address: Hex = BOOK.chamber): Log => noteAppendedLog(address, index, note);
 
-/** A NoteAppended log as the Chamber emits it, one per appended leaf. */
-function appendedLog(index: bigint, note: bigint, address: Hex = BOOK.chamber): Log {
-  return {
-    address,
-    topics: encodeEventTopics({ abi: chamberAbi, eventName: 'NoteAppended', args: { index, note } }) as Hex[],
-    data: encodeAbiParameters([{ type: 'uint256' }], [999n]),
-  };
-}
-
-/** A DepositQueued log: a screened deposit's note waiting on the screener. */
-function queuedLog(depositId: bigint, noteHash: bigint, reserve: Hex = BOOK.reserve): Log {
-  return {
-    address: BOOK.chamber,
-    topics: encodeEventTopics({ abi: chamberAbi, eventName: 'DepositQueued', args: { depositId, reserve, depositor: ALICE_ADDR } }) as Hex[],
-    data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }], [noteHash, BOOK.token, 100n]),
-  };
-}
+const queuedLog = (depositId: bigint, noteHash: bigint, reserve: Hex = BOOK.reserve): Log =>
+  depositQueuedLog(BOOK.chamber, { depositId, noteHash, reserve, depositor: ALICE_ADDR, asset: BOOK.token, amount: 100n });
 
 // Like `client.test.ts`'s mockChain, but records both writes (for ABI
 // decoding) and reads (for the spendState path) and lets each test shape the
