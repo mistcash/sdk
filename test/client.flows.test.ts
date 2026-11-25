@@ -96,7 +96,10 @@ function appendedLog(index: bigint, note: bigint, address: Hex = BOOK.chamber): 
 // those differently.
 function mockChain(
   cfg: {
+    /** Chamber's txArray, every tx tree in order. */
     txLeaves?: bigint[];
+    /** txTreeCapacity; production is 4^10. */
+    capacity?: bigint;
     stateLeaves?: bigint[];
     reserveCfg?: unknown;
     users?: bigint;
@@ -115,7 +118,12 @@ function mockChain(
     readContract: async (address, fn, args) => {
       if (!CORE_FUNCTIONS.has(fn)) throw new Error(`mockChain: ${fn} is not in CORE_ABI`);
       reads.push({ address, fn, args: args ?? [] });
-      if (fn === 'getTxArray') return cfg.txLeaves ?? [];
+      if (fn === 'getTxArray') {
+        const [offset, limit] = (args ?? []) as [bigint, bigint];
+        return (cfg.txLeaves ?? []).slice(Number(offset), Number(offset + limit));
+      }
+      if (fn === 'txTreeCapacity') return cfg.capacity ?? 4n ** 10n;
+      if (fn === 'noteIndexPlusOne') return BigInt((cfg.txLeaves ?? []).indexOf(args?.[0] as bigint) + 1);
       if (fn === 'zkStateLeaf') return cfg.stateLeaves?.[Number(args?.[0] ?? 0)] ?? 0n;
       if (fn === 'reserveConfigs') return cfg.reserveCfg ?? [0n, 7n, 0n];
       if (fn === 'registeredUsersCount') return cfg.users ?? 0n;
@@ -603,7 +611,7 @@ describe('MistClient flows', () => {
     });
     const { prover, requests } = mockProver();
     const client = makeClient({ chain, prover });
-    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '22' }];
 
     await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve });
 
@@ -614,7 +622,7 @@ describe('MistClient flows', () => {
     expect(req.ReserveConfig).toBe('7');
     expect(req.Reserve).toBe(BOOK.reserve);
     expect(reads.filter((r) => r.fn === 'zkStateLeaf').map((r) => r.args[0])).toEqual([0n, 1n, 2n]);
-    expect(reads.some((r) => r.fn === 'getTxArray' && r.address === BOOK.chamber)).toBe(true);
+    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'getTxArray', args: [0n, 4096n] });
     expect(reads.some((r) => r.fn === 'reserveConfigs' && r.address === BOOK.chamber && r.args[0] === BOOK.reserve)).toBe(true);
     expect(reads.some((r) => r.fn === 'registeredUsersCount' && r.address === BOOK.reserve)).toBe(true);
   });
@@ -622,16 +630,110 @@ describe('MistClient flows', () => {
   it('tolerates a chain adapter without getEvents and a bare reserveConfigs value', async () => {
     // `getEvents` is optional on ChainAdapter and `reserveConfigs` shapes vary
     // across adapters; neither may crash a plain spend.
-    const { chain, reads } = mockChain({ reserveCfg: 55n });
+    const { chain, reads } = mockChain({ reserveCfg: 55n, txLeaves: [11n] });
     const { prover, requests } = mockProver();
     const client = makeClient({ chain, prover });
-    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '11' }];
 
     await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve });
 
     expect(requests[0].UserLeaves).toEqual([]);
     expect(requests[0].ReserveConfig).toBe('55');
     expect(reads.filter((r) => r.fn === 'zkStateLeaf').map((r) => r.args[0])).toEqual([0n]);
+  });
+
+  it("spend proves against the input note's own tx tree, located by its hash", async () => {
+    // Tx trees roll over every txTreeCapacity leaves and a spend proves
+    // against one tree's root, so TxLeaves must be that tree alone: trees of
+    // 4 here, and the note (index 5) sits in tree 1.
+    const txLeaves = Array.from({ length: 10 }, (_, i) => 100n + BigInt(i));
+    const { chain, reads } = mockChain({ txLeaves, capacity: 4n });
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    const note = { reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '105' };
+    client.notes = [note];
+
+    await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve });
+
+    expect(requests[0].TxLeaves).toEqual(['104', '105', '106', '107']);
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[4n, 4n]]);
+    expect(note).toMatchObject({ txIndex: 5, spent: true });
+  });
+
+  it('spend never pairs inputs from different tx trees', async () => {
+    // 50 (tree 0) + 55 (tree 1) is the tightest cover, but only 55 + 60
+    // (both tree 1) can be proven together.
+    const txLeaves = Array.from({ length: 8 }, (_, i) => 100n + BigInt(i));
+    const { chain } = mockChain({ txLeaves, capacity: 4n });
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    client.notes = [
+      { reserve: BOOK.reserve, id: 'alice', blinding: 'b50', amount: 50n, hash: '101' },
+      { reserve: BOOK.reserve, id: 'alice', blinding: 'b55', amount: 55n, txIndex: 5 },
+      { reserve: BOOK.reserve, id: 'alice', blinding: 'b60', amount: 60n, txIndex: 6 },
+    ];
+
+    await client.spend({ id: 'alice', amount: 100n, to: 'bob', reserve: BOOK.reserve });
+
+    expect(requests[0].In.map((x) => x.Blinding)).toEqual(['b55', 'b60']);
+    expect(requests[0].TxLeaves).toEqual(['104', '105', '106', '107']);
+  });
+
+  it('spend leaves out notes that are in no tx tree', async () => {
+    // A hash the Chamber never appended (noteIndexPlusOne = 0), or no hash at
+    // all, cannot be proven against any root.
+    const { chain, sent } = mockChain({ txLeaves: [11n] });
+    const client = makeClient({ chain });
+    client.notes = [
+      { reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '99' },
+      { reserve: BOOK.reserve, id: 'alice', blinding: '2', amount: 100n },
+    ];
+
+    await expect(client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve })).rejects.toThrow(
+      'Your notes here hold 0.',
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it('txTreeLeaves pages getTxArray and stops at the end of the tree', async () => {
+    // One eth_call per page: a full tree is 4^10 leaves, too many for one
+    // response.
+    const txLeaves = Array.from({ length: 5000 }, (_, i) => BigInt(i + 1));
+    const { chain, reads } = mockChain({ txLeaves, capacity: 8192n });
+    const client = makeClient({ chain });
+
+    const leaves = await client.txTreeLeaves(0);
+
+    expect(leaves).toHaveLength(5000);
+    expect(leaves.at(-1)).toBe('5000');
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[0n, 4096n], [4096n, 4096n]]);
+    expect(await client.txTreeLeaves(1)).toEqual([]);
+  });
+
+  it('txTreeLeaves never reads past its own tree', async () => {
+    const txLeaves = Array.from({ length: 10 }, (_, i) => BigInt(i + 1));
+    const { chain, reads } = mockChain({ txLeaves, capacity: 4n });
+    const client = makeClient({ chain });
+
+    expect(await client.txTreeLeaves(1)).toEqual(['5', '6', '7', '8']);
+    expect(await client.txTreeLeaves(2)).toEqual(['9', '10']);
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[4n, 4n], [8n, 4n]]);
+    // Capacity is a Chamber constant: read once.
+    expect(reads.filter((r) => r.fn === 'txTreeCapacity')).toHaveLength(1);
+  });
+
+  it("records the tx index of a spend's new notes from NoteAppended", async () => {
+    // The prover's newNote1/newNote2 are publicInputs[2]/[3] ('12', '13').
+    const { chain } = mockChain({ respond: () => ({ logs: [appendedLog(10n, 12n), appendedLog(11n, 13n)] }) });
+    const client = makeClient({ chain });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, state: fixedState() });
+
+    expect(client.notes.filter((x) => !x.spent).map((x) => [x.kind, x.hash, x.txIndex])).toEqual([
+      ['received', '12', 10],
+      ['change', '13', 11],
+    ]);
   });
 
   it('spendState falls back to owner 0 when identity resolution throws', async () => {

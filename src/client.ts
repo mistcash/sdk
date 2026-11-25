@@ -100,6 +100,7 @@ export interface SpendOpts {
   keyIndex?: number;
   /** Fetched chain state; when omitted the client reads it via the adapter. */
   state?: {
+    /** Leaves of the one tx tree holding the input notes (`txTreeLeaves`). */
     txLeaves: string[];
     stateLeaves: string[];
     userLeaves: string[];
@@ -259,18 +260,16 @@ export class MistClient {
   }
 
   /**
-   * Re-read every local screened note: approved ones (their note is in the
+   * Re-read every local screened note: approved ones (their note is in a
    * tx tree) become spendable, rejected ones are marked so, and pending ones
-   * that left the queue without entering the tree were reclaimed.
+   * that left the queue without entering a tree were reclaimed.
    */
   async refreshScreening(notes: Note[] = this.notes): Promise<Note[]> {
     const open = notes.filter((x) => x.depositId && (x.screening === 'pending' || x.screening === 'rejected'));
-    if (!open.length) return [];
-    const inTree = new Set(((await this.chain.readContract(this.book.chamber, 'getTxArray')) as bigint[]).map(String));
     for (const note of open) {
       const { status } = await this.pendingDeposit(note.depositId!);
       if (status !== 'none') note.screening = status;
-      else if (inTree.has(String(note.hash))) delete note.screening;
+      else if (await this.locate(note)) delete note.screening;
       else note.screening = 'reclaimed';
     }
     return open;
@@ -365,9 +364,15 @@ export class MistClient {
     const reserve = opts.reserve ?? this.defaultReserve();
     const amount = opts.amount + (opts.withdraw ?? 0n);
     if ((opts.withdraw ?? 0n) > 0n && !opts.withdrawTo) throw new Error('withdrawTo is required for withdrawals');
+    // Fetched state proves against the selected notes' own tx tree; injected
+    // state brings its own leaves.
+    const txTreeCapacity = opts.state ? undefined : await this.txTreeCapacity();
+    if (!opts.state) await Promise.all(unspent(notes, reserve, opts.id).map((n) => this.locate(n)));
     const st = opts.state ?? (await this.spendState(reserve, opts.id));
-    const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember: await this.isMember(reserve, opts.id), notes });
+    const isMember = await this.isMember(reserve, opts.id);
+    const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember, notes, txTreeCapacity });
     if ('error' in p) throw new Error(p.error);
+    const txLeaves = opts.state?.txLeaves ?? (await this.txTreeLeaves(p.txTree!));
 
     const owner = await this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
@@ -393,7 +398,7 @@ export class MistClient {
       outputs: out,
       withdraw: opts.withdraw ?? 0n,
       withdrawTo: opts.withdraw && opts.withdrawTo ? this.addressOf(opts.withdrawTo) : '0',
-      txLeaves: st.txLeaves,
+      txLeaves,
       stateLeaves: st.stateLeaves,
       userLeaves: st.userLeaves,
     });
@@ -425,9 +430,14 @@ export class MistClient {
 // would over-record, not under-record.
 if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedIndex(ukx, keyIndex);
     p.notes.forEach((nn, i) => Object.assign(nn, { spent: true, nullifier: res.publicInputs[i] }));
+    const appended = new Map<string, number>();
+    for (const { eventName, args } of this.chamberEvents(receipt)) {
+      if (eventName === 'NoteAppended') appended.set(String(args.note), Number(args.index));
+    }
     out.forEach((o, i) => {
       if (o.Amount > 0n && o.id) {
-        this.notes.push({ reserve, id: o.id, blinding: o.Blinding, amount: o.Amount, hash: res.publicInputs[2 + i], kind: i ? 'change' : 'received' });
+        const hash = res.publicInputs[2 + i];
+        this.notes.push({ reserve, id: o.id, blinding: o.Blinding, amount: o.Amount, hash, txIndex: appended.get(hash), kind: i ? 'change' : 'received' });
       }
     });
     return { receipt, secs, commitments: res.commitments ?? [] };
@@ -606,9 +616,8 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   private async spendState(
     reserve: Hex,
     id: string,
-  ): Promise<NonNullable<SpendOpts['state']>> {
-    const [txLeaves, stateLeaves, reserveCfg, users] = await Promise.all([
-      this.chain.readContract(this.book.chamber, 'getTxArray'),
+  ): Promise<Omit<NonNullable<SpendOpts['state']>, 'txLeaves'>> {
+    const [stateLeaves, reserveCfg, users] = await Promise.all([
       this.zkStateLeaves(),
       this.chain.readContract(this.book.chamber, 'reserveConfigs', [reserve]),
       this.chain.readContract(reserve, 'registeredUsersCount'),
@@ -616,13 +625,49 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     const userLeaves = await this.chain.getEvents?.(reserve, 'UserRegistered', 0n).then((evts) => evts.map((e) => String(e.args['leaf']))) ?? [];
     const owner = await this.ownerFor(id).catch(() => '0');
     return {
-      txLeaves: (txLeaves as bigint[]).map(String),
       stateLeaves,
       userLeaves,
       reserveConfig: String((reserveCfg as [bigint, bigint, bigint])[1] ?? reserveCfg),
       reserveUsers: BigInt(String(users)),
       ukx: this.ukx[`${reserve}:${owner}`] ?? '0',
     };
+  }
+
+  /** Chamber's tx tree capacity (4^10 in production); read once. */
+  private txTreeCapacity(): Promise<number> {
+    this.capacity ??= this.chain.readContract(this.book.chamber, 'txTreeCapacity').then(Number);
+    return this.capacity;
+  }
+
+  private capacity?: Promise<number>;
+
+  /**
+   * Set `note.txIndex` from its hash (`Chamber.noteIndexPlusOne`) when
+   * unknown. False when the note is in no tx tree.
+   */
+  private async locate(note: Note): Promise<boolean> {
+    if (note.txIndex === undefined && note.hash) {
+      const plusOne = BigInt((await this.chain.readContract(this.book.chamber, 'noteIndexPlusOne', [BigInt(note.hash)])) as bigint);
+      if (plusOne > 0n) note.txIndex = Number(plusOne - 1n);
+    }
+    return note.txIndex !== undefined;
+  }
+
+  /**
+   * Every leaf of tx tree `treeId`, the `txLeaves` a spend of its notes
+   * proves against, paged through `getTxArray(offset, limit)`.
+   */
+  async txTreeLeaves(treeId: number): Promise<string[]> {
+    const capacity = await this.txTreeCapacity();
+    const start = BigInt(treeId) * BigInt(capacity);
+    const leaves: string[] = [];
+    while (leaves.length < capacity) {
+      const limit = Math.min(TX_PAGE, capacity - leaves.length);
+      const page = (await this.chain.readContract(this.book.chamber, 'getTxArray', [start + BigInt(leaves.length), BigInt(limit)])) as bigint[];
+      leaves.push(...page.map(String));
+      if (page.length < limit) break;
+    }
+    return leaves;
   }
 
   async zkStateLeaves(): Promise<string[]> {
@@ -637,3 +682,6 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
 }
 
 const DEPOSIT_STATUS: DepositStatus[] = ['none', 'pending', 'rejected'];
+
+/** Leaves per `getTxArray` read: 128 KiB of return data. */
+const TX_PAGE = 4096;

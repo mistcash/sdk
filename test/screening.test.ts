@@ -57,7 +57,7 @@ function screenedChain(opts: { screener?: Hex; queue?: Record<string, number>; t
         const id = String(args?.[0]);
         return [ME, queue[id] ?? 0, BOOK.reserve, BOOK.token, 100n, NOTE];
       }
-      if (fn === 'getTxArray') return tree;
+      if (fn === 'noteIndexPlusOne') return BigInt(tree.indexOf(args?.[0] as bigint) + 1);
       if (fn === 'reserveAssetMinDeposit') return 1n;
       return 0n;
     },
@@ -126,9 +126,11 @@ describe('deposit screening', () => {
     expect(note.screening).toBe('reclaimed');
 
     note.screening = 'pending';
-    env.tree.push(NOTE);
+    env.tree.push(1n, NOTE);
     await c.refreshScreening();
     expect(note.screening).toBeUndefined();
+    // Approval appended it at index 1, which fixes its tx tree.
+    expect(note.txIndex).toBe(1);
     expect(c.unspent(BOOK.reserve, 'alice')).toEqual([note]);
   });
 
