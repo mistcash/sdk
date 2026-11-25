@@ -195,7 +195,7 @@ export class MistClient {
         : encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args }),
       'deposit',
     );
-    const placed = this.depositOutcome(receipt, result);
+    const placed = this.depositOutcome(reserve, receipt, result);
     if (!placed) {
       throw new Error(
         'MistClient: deposit sent, but its receipt has no NoteAppended or DepositQueued log and no (noteHash, depositId) result: return receipt.logs from sendTransaction',
@@ -220,21 +220,27 @@ export class MistClient {
 
   /**
    * Where a deposit's note went: into the tx tree (`NoteAppended`), or the
-   * screening queue (`DepositQueued`). Falls back to the call's
-   * `(noteHash, depositId)` result for adapters that return it but no logs.
+   * screening queue (`DepositQueued` at `reserve`). The call's
+   * `(noteHash, depositId)` result, when the adapter returns it, picks this
+   * deposit's event from a receipt that holds others, and stands in for
+   * missing logs.
    */
-  private depositOutcome(receipt: TxReceipt, result: unknown): Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'> | undefined {
+  private depositOutcome(reserve: Hex, receipt: TxReceipt, result: unknown): Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'> | undefined {
+    const [hash, depositId] = Array.isArray(result) && result.length === 2 ? result.map(String) : [];
+    const found: Array<Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'>> = [];
     for (const { eventName, args } of this.chamberEvents(receipt)) {
-      if (eventName === 'DepositQueued') return { hash: String(args.noteHash), screening: 'pending', depositId: String(args.depositId) };
-      if (eventName === 'NoteAppended') return { hash: String(args.note), txIndex: Number(args.index) };
+      if (eventName === 'DepositQueued' && args.reserve.toLowerCase() === reserve.toLowerCase()) {
+        found.push({ hash: String(args.noteHash), screening: 'pending', depositId: String(args.depositId) });
+      }
+      if (eventName === 'NoteAppended') found.push({ hash: String(args.note), txIndex: Number(args.index) });
     }
-    if (Array.isArray(result) && result.length === 2) {
-      const [hash, depositId] = result as [bigint, bigint];
-      return BigInt(depositId) === 0n
-        ? { hash: String(hash) }
-        : { hash: String(hash), screening: 'pending', depositId: String(depositId) };
+    const mine = hash ? found.filter((o) => o.hash === hash) : found;
+    if (mine.length > 1) {
+      throw new Error("MistClient: the deposit's receipt holds several Chamber notes: return the call's (noteHash, depositId) result to pick this one");
     }
-    return undefined;
+    if (mine.length) return mine[0];
+    if (!hash) return undefined;
+    return depositId === '0' ? { hash } : { hash, screening: 'pending', depositId };
   }
 
   // ── Deposit screening ────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, parseAbi } from 'viem';
 import { MistClient, type SpendOpts } from '../src/client.js';
 import { CORE_ABI, RESERVE_ROLES } from '../src/contracts.js';
-import { chamberAbi, managerSigRegistrarAbi, reserveAbi } from '../src/abis.generated.js';
+import { chamberAbi, erc20Abi, managerSigRegistrarAbi, reserveAbi } from '../src/abis.generated.js';
 import { OWNER_KEYWORD } from '../src/identity.js';
 import { decapsulate, deriveUkx, managerKeys } from '../src/pq.js';
 import type { ProverAdapter } from '../src/proving.js';
@@ -86,6 +86,15 @@ function appendedLog(index: bigint, note: bigint, address: Hex = BOOK.chamber): 
     address,
     topics: encodeEventTopics({ abi: chamberAbi, eventName: 'NoteAppended', args: { index, note } }) as Hex[],
     data: encodeAbiParameters([{ type: 'uint256' }], [999n]),
+  };
+}
+
+/** A DepositQueued log: a screened deposit's note waiting on the screener. */
+function queuedLog(depositId: bigint, noteHash: bigint, reserve: Hex = BOOK.reserve): Log {
+  return {
+    address: BOOK.chamber,
+    topics: encodeEventTopics({ abi: chamberAbi, eventName: 'DepositQueued', args: { depositId, reserve, depositor: ALICE_ADDR } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }], [noteHash, BOOK.token, 100n]),
   };
 }
 
@@ -236,10 +245,35 @@ describe('MistClient flows', () => {
     expect(note).toMatchObject({ hash: '4242', txIndex: 5, kind: 'deposit' });
     expect(note.screening).toBeUndefined();
     expect(sent.map((t) => t.to)).toEqual([BOOK.token, BOOK.chamber]);
+    // The Reserve, not the Chamber, pulls the tokens.
+    expect(decodeFunctionData({ abi: erc20Abi, data: sent[0].data })).toEqual({ functionName: 'approve', args: [BOOK.reserve, 100n] });
     const call = decodeFunctionData({ abi: chamberAbi, data: sent[1].data });
     expect(call.functionName).toBe('deposit');
     // The commitment is H2(blinding, owner); the mock hash2 answers 123.
     expect(call.args).toEqual([BOOK.reserve, 123n, 100n, BOOK.token]);
+  });
+
+  it('deposit picks its own note from a receipt that holds others', async () => {
+    // A bundled receipt (e.g. an ERC-4337 bundle) can carry other deposits'
+    // events: the call's result names this one, and DepositQueued names its reserve.
+    const appended = mockChain({ respond: () => ({ logs: [appendedLog(3n, 1111n), appendedLog(5n, 4242n)], result: [4242n, 0n] }) });
+    expect(await makeClient({ chain: appended.chain }).deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).toMatchObject({
+      hash: '4242', txIndex: 5,
+    });
+
+    const queued = mockChain({ respond: () => ({ logs: [queuedLog(9n, 1111n, OTHER_RESERVE), queuedLog(7n, 4242n)] }) });
+    expect(await makeClient({ chain: queued.chain }).deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).toMatchObject({
+      hash: '4242', screening: 'pending', depositId: '7',
+    });
+  });
+
+  it('deposit refuses to guess between several notes in one receipt', async () => {
+    const { chain } = mockChain({ respond: () => ({ logs: [appendedLog(3n, 1111n), appendedLog(5n, 4242n)] }) });
+    const client = makeClient({ chain });
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      /several Chamber notes/,
+    );
+    expect(client.notes).toEqual([]);
   });
 
   it('deposit names refundTo through the five-argument overload', async () => {
