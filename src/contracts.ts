@@ -5,6 +5,7 @@
 // (identity, pq, client), but the ChainAdapter keeps it independent of any
 // one client library for transport.
 
+import { keccak256, toHex } from 'viem';
 import type { Hex } from './types.js';
 import { abisHumanReadable, coreAbiHumanReadable, screeningAbiHumanReadable } from './abis.generated.js';
 
@@ -22,6 +23,24 @@ export const CORE_ABI = [...coreAbiHumanReadable, ...SCREENING_ABI] as const;
 
 /** Full per-contract decoding surface, as human-readable signatures. */
 export const ABIS = abisHumanReadable;
+
+/**
+ * A Reserve permission. The reserve's admin holds every one and grants or
+ * revokes them; each can be held by any number of accounts.
+ * - `ASSETS`: list assets and set their minimum deposit (`setAssetMinDeposit`)
+ * - `USERS`: add and remove users; registrar signers and the registrar need it
+ * - `METADATA`: rotate the auditor key (`updateAuditorKey`)
+ * - `SCREENING`: set the deposit screener (`setReserveScreener`)
+ */
+export type ReserveRole = 'ASSETS' | 'USERS' | 'METADATA' | 'SCREENING';
+
+/** Each role's `bytes32` id: `keccak256(name)`, as `Reserve` declares it. */
+export const RESERVE_ROLES: Readonly<Record<ReserveRole, Hex>> = {
+  ASSETS: keccak256(toHex('ASSETS')),
+  USERS: keccak256(toHex('USERS')),
+  METADATA: keccak256(toHex('METADATA')),
+  SCREENING: keccak256(toHex('SCREENING')),
+};
 
 /** Deployment address book (`core-deploy/dist/deployments/*.json`). */
 export interface AddressBook {

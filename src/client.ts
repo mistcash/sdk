@@ -9,7 +9,7 @@ import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, randomKeyIndex, type ProverAdapter, type SpendRequest } from './proving.js';
 import { deriveUkx, encapsulate } from './pq.js';
-import type { AddressBook } from './contracts.js';
+import { RESERVE_ROLES, type AddressBook, type ReserveRole } from './contracts.js';
 import { chamberAbi, erc20Abi, managerSigRegistrarAbi, reserveAbi } from './abis.generated.js';
 import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDeposit, StorageAdapter, TxReceipt } from './types.js';
 
@@ -149,6 +149,11 @@ export class MistClient {
     const sent = await this.chain.sendTransaction({ to, data });
     this.callbacks.onTx?.({ functionName, receipt: sent.receipt });
     return { receipt: sent.receipt, result: sent.result };
+  }
+
+  /** `write` for calls whose receipt is all the caller needs. */
+  private async send(to: Hex, data: Hex, functionName: string): Promise<TxReceipt> {
+    return (await this.write(to, data, functionName)).receipt;
   }
 
   private async ownerFor(id: string): Promise<string> {
@@ -514,22 +519,71 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     return null;
   }
 
-  // ── Owner / manager admin ────────────────────────────────────────────────
+  // ── Chamber owner ────────────────────────────────────────────────────────
 
-  async registerReserve(manager: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName: 'registerReserve', args: [manager, keyHash, keyInputPoint] }),
-      'registerReserve',
-    );
-    return receipt;
+  /** Deploy and register a reserve with its admin (Chamber owner only). */
+  async registerReserve(admin: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
+    return this.send(this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName: 'registerReserve', args: [admin, keyHash, keyInputPoint] }), 'registerReserve');
   }
 
+  // ── Reserve admin and permissions ────────────────────────────────────────
+
+  /** Whether `account` holds `role` on `reserve` (the admin holds them all). */
+  async hasPermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<boolean> {
+    return Boolean(await this.chain.readContract(reserve, 'hasPermission', [RESERVE_ROLES[role], account]));
+  }
+
+  /** Give `account` a permission on `reserve`. Admin only. */
+  async grantPermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'grantPermission', args: [RESERVE_ROLES[role], account] }), 'grantPermission');
+  }
+
+  /** Take a granted permission back (never the admin's own). Admin only. */
+  async revokePermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'revokePermission', args: [RESERVE_ROLES[role], account] }), 'revokePermission');
+  }
+
+  /**
+   * Nominate `newAdmin`, who takes over with `acceptAdmin`; the zero address
+   * cancels. Admin only. Grants survive the handover.
+   */
+  async transferAdmin(reserve: Hex, newAdmin: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'transferAdmin', args: [newAdmin] }), 'transferAdmin');
+  }
+
+  /** Become the reserve's admin. Only the nominated pending admin. */
+  async acceptAdmin(reserve: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'acceptAdmin' }), 'acceptAdmin');
+  }
+
+  /**
+   * List `asset` at `reserve` with a minimum deposit; zero delists it. Needs
+   * ASSETS. Nothing is depositable until listed.
+   */
+  async setAssetMinDeposit(reserve: Hex, asset: Hex, minDeposit: bigint): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'setAssetMinDeposit', args: [asset, minDeposit] }), 'setAssetMinDeposit');
+  }
+
+  /**
+   * Zero the user at `index` (from `UserRegistered`; see
+   * `registeredUserLeaves`). Needs USERS. Takes full effect within the
+   * Chamber's 10-minute zkState root grace; removing the last user reverts.
+   */
+  async removeUser(reserve: Hex, index: bigint): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'removeUser', args: [index] }), 'removeUser');
+  }
+
+  /** Rotate the auditor key. Needs METADATA. */
   async updateAuditorKey(reserve: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'updateAuditorKey', args: [keyHash, keyInputPoint] }), 'updateAuditorKey',
-    );
-    return receipt;
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'updateAuditorKey', args: [keyHash, keyInputPoint] }), 'updateAuditorKey');
+  }
+
+  /**
+   * Permanently revoke the registrar signature for `(reserve, leaf,
+   * deadline)` before it is used. Needs USERS on `reserve`.
+   */
+  async revokeRegistration(reserve: Hex, leaf: bigint, deadline: bigint): Promise<TxReceipt> {
+    return this.send(this.book.registrar, encodeFunctionData({ abi: managerSigRegistrarAbi, functionName: 'revoke', args: [reserve, leaf, deadline] }), 'revoke');
   }
 
   // ── State helpers ────────────────────────────────────────────────────────

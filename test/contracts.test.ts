@@ -12,9 +12,9 @@
 // only one of the two is updated, every proof reverts on-chain.
 
 import { describe, expect, it } from 'vitest';
-import { parseAbi, parseAbiItem } from 'viem';
-import { ABIS, CORE_ABI, PUBLIC_INPUTS } from '../src/contracts.js';
-import { chamberAbi, chamberVerifierAbi } from '../src/abis.generated.js';
+import { keccak256, parseAbi, parseAbiItem, toHex } from 'viem';
+import { ABIS, CORE_ABI, PUBLIC_INPUTS, RESERVE_ROLES } from '../src/contracts.js';
+import { chamberAbi, chamberVerifierAbi, reserveAbi } from '../src/abis.generated.js';
 
 const parsedHandleZkp = () =>
   (parseAbi(CORE_ABI as unknown as string[]) as Array<{ type: string; name?: string; inputs?: Array<{ type: string }> }>)
@@ -82,6 +82,16 @@ describe('contracts', () => {
     const parsed = parseAbiItem(event!) as { type: string; name: string };
     expect(parsed.type).toBe('event');
     expect(parsed.name).toBe('UserRegistered');
+  });
+
+  it("names exactly the Reserve's permission roles, as keccak256 of each name", () => {
+    // Reserve declares each role as `bytes32 public constant NAME =
+    // keccak256("NAME")`; its ABI shows them as bytes32 getters.
+    const roles = reserveAbi
+      .filter((i) => i.type === 'function' && i.inputs.length === 0 && i.outputs.length === 1 && i.outputs[0].type === 'bytes32')
+      .map((i) => (i as { name: string }).name);
+    expect(Object.keys(RESERVE_ROLES).sort()).toEqual([...roles].sort());
+    for (const [name, hash] of Object.entries(RESERVE_ROLES)) expect(hash).toBe(keccak256(toHex(name)));
   });
 
   it('declares the owner() getter the client reads on construction', () => {

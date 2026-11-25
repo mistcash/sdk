@@ -8,8 +8,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, parseAbi } from 'viem';
 import { MistClient, type SpendOpts } from '../src/client.js';
-import { CORE_ABI } from '../src/contracts.js';
-import { chamberAbi } from '../src/abis.generated.js';
+import { CORE_ABI, RESERVE_ROLES } from '../src/contracts.js';
+import { chamberAbi, managerSigRegistrarAbi, reserveAbi } from '../src/abis.generated.js';
 import { OWNER_KEYWORD } from '../src/identity.js';
 import { decapsulate, deriveUkx, managerKeys } from '../src/pq.js';
 import type { ProverAdapter } from '../src/proving.js';
@@ -134,6 +134,7 @@ function mockChain(
       if (fn === 'inflowsPaused') return cfg.inflowsPaused ?? false;
       if (fn === 'spendsPaused') return cfg.spendsPaused ?? false;
       if (fn === 'isValidZkStateRoot') return cfg.validRoot ?? true;
+      if (fn === 'hasPermission') return (args?.[1] as Hex) === ALICE_ADDR && (args?.[0] as Hex) === RESERVE_ROLES.USERS;
       if (fn === 'reserveAssetMinDeposit') return cfg.minDeposit ?? 1n;
       return 0n;
     },
@@ -959,6 +960,65 @@ describe('MistClient flows', () => {
   });
 
   // ── admin wrappers ───────────────────────────────────────────────────────
+
+  it('reserve admin calls go to the reserve with the role hash and account in order', async () => {
+    // Every permissioned action is taken on the Reserve, which pushes the
+    // result to the Chamber.
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+    const NEXT = '0x8888888888888888888888888888888888888888' as Hex;
+
+    await client.grantPermission(BOOK.reserve, 'SCREENING', SIGNER);
+    await client.revokePermission(BOOK.reserve, 'ASSETS', NEXT);
+    await client.transferAdmin(BOOK.reserve, NEXT);
+    await client.acceptAdmin(BOOK.reserve);
+    await client.setAssetMinDeposit(BOOK.reserve, BOOK.token, 25n);
+    await client.removeUser(BOOK.reserve, 3n);
+
+    expect(sent.map((t) => t.to)).toEqual(Array(6).fill(BOOK.reserve));
+    expect(sent.map((t) => decodeFunctionData({ abi: reserveAbi, data: t.data }))).toEqual([
+      { functionName: 'grantPermission', args: [RESERVE_ROLES.SCREENING, SIGNER] },
+      { functionName: 'revokePermission', args: [RESERVE_ROLES.ASSETS, NEXT] },
+      { functionName: 'transferAdmin', args: [NEXT] },
+      { functionName: 'acceptAdmin', args: undefined },
+      { functionName: 'setAssetMinDeposit', args: [BOOK.token, 25n] },
+      { functionName: 'removeUser', args: [3n] },
+    ]);
+  });
+
+  it('hasPermission asks the reserve for one role and account', async () => {
+    const { chain, reads } = mockChain();
+    const client = makeClient({ chain });
+
+    expect(await client.hasPermission(BOOK.reserve, 'USERS', ALICE_ADDR)).toBe(true);
+    expect(await client.hasPermission(BOOK.reserve, 'METADATA', ALICE_ADDR)).toBe(false);
+    expect(await client.hasPermission(BOOK.reserve, 'USERS', BOB_ADDR)).toBe(false);
+    expect(reads[0]).toEqual({ address: BOOK.reserve, fn: 'hasPermission', args: [RESERVE_ROLES.USERS, ALICE_ADDR] });
+  });
+
+  it('revokeRegistration revokes one (reserve, leaf, deadline) signature at the registrar', async () => {
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+
+    await client.revokeRegistration(BOOK.reserve, 777n, DEADLINE);
+
+    expect(sent[0].to).toBe(BOOK.registrar);
+    expect(decodeFunctionData({ abi: managerSigRegistrarAbi, data: sent[0].data })).toEqual({
+      functionName: 'revoke', args: [BOOK.reserve, 777n, DEADLINE],
+    });
+  });
+
+  it('registerReserve names the admin first', async () => {
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+
+    await client.registerReserve(SIGNER, 789n, 987n);
+
+    expect(sent[0].to).toBe(BOOK.chamber);
+    expect(decodeFunctionData({ abi: chamberAbi, data: sent[0].data })).toEqual({
+      functionName: 'registerReserve', args: [SIGNER, 789n, 987n],
+    });
+  });
 
   it('updateAuditorKey pins keyHash before keyInputPoint', async () => {
     const { chain, sent } = mockChain();
