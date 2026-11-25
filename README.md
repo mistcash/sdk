@@ -281,7 +281,8 @@ await client.rejectDeposits(bad.map((d) => d.depositId), evidenceHash);
 - `deposit()` reads the note hash, and the deposit id or tx index, from the
   receipt's `DepositQueued` or `NoteAppended` log, so your `sendTransaction`
   adapter must return `receipt.logs` (viem's receipt logs as-is), or a
-  `result` holding the call's `(noteHash, depositId)`.
+  `result` holding the call's `(noteHash, depositId)`. With neither, it
+  stops after the approve, before any funds move.
 - `queuedDeposits()` needs `ChainAdapter.getEvents` for `DepositQueued`.
 - A batch skips ids that are no longer pending (e.g. reclaimed), and approval
   rejects a deposit whose note is already in a tx tree
@@ -327,7 +328,11 @@ await nextAdminClient.acceptAdmin(reserve);
 - `revokeRegistration` kills one outstanding `(reserve, leaf, deadline)`
   signature before it is used.
 - `removeUser(reserve, index)` zeroes a user's leaf (the index is in its
-  `UserRegistered` event; `registeredUserLeaves(reserve)` lists them). It
+  `UserRegistered` event; `registeredUserLeaves(reserve)` lists them). A
+  spend at a reserve with members proves against every slot, so
+  `ChainAdapter.getEvents` must serve all of the reserve's `UserRegistered`
+  and `UserRemoved` events; `spend()` refuses before proving when it reads
+  fewer leaves than `registeredUsersCount`. It
   takes full effect within the 10-minute zkState root grace; removing the
   last user reverts. A removed member's `spend()` fails with "This reserve no
   longer lists you as a member: join it again."; re-joining needs a new
