@@ -278,7 +278,8 @@ export class MistClient {
     for (const note of open) {
       const { status } = await this.pendingDeposit(note.depositId!);
       if (status !== 'none') note.screening = status;
-      else if (await this.locate(note)) delete note.screening;
+      // Rejection is final: a rejected deposit leaves the queue only by reclaim.
+      else if (note.screening !== 'rejected' && (await this.locate(note))) delete note.screening;
       else note.screening = 'reclaimed';
     }
     return open;

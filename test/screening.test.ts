@@ -144,6 +144,23 @@ describe('deposit screening', () => {
     expect(c.unspent(BOOK.reserve, 'alice')).toEqual([note]);
   });
 
+  it('reads a rejected deposit that left the queue as reclaimed, even when its note is in the tree', async () => {
+    // Rejection is final. A duplicate of an approved note is rejected
+    // (DepositDuplicateRejected) while its twin's hash sits in the tree;
+    // once reclaimed, its funds are gone and it must not look approved.
+    const env = screenedChain({ queue: { '7': 2 } });
+    const c = client(env.chain);
+    const note = await c.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' });
+    await c.refreshScreening();
+    expect(note.screening).toBe('rejected');
+
+    env.queue['7'] = 0;
+    env.tree.push(NOTE);
+    await c.refreshScreening();
+    expect(note.screening).toBe('reclaimed');
+    expect(c.unspent(BOOK.reserve, 'alice')).toEqual([]);
+  });
+
   it('reclaims a deposit', async () => {
     const env = screenedChain();
     const c = client(env.chain);
