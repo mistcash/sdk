@@ -96,6 +96,12 @@ describe('deposit screening', () => {
     }
   });
 
+  it('isScreened reads the reserve screener, and says no on a Chamber without screening', async () => {
+    expect(await client(screenedChain().chain).isScreened(BOOK.reserve)).toBe(true);
+    expect(await client(screenedChain({ screener: '0x0000000000000000000000000000000000000000' }).chain).isScreened(BOOK.reserve)).toBe(false);
+    expect(await client(screenedChain({ reverts: true }).chain).isScreened(BOOK.reserve)).toBe(false);
+  });
+
   it('throws when a screened deposit receipt has no DepositQueued', async () => {
     const { chain } = screenedChain();
     const c = client({ ...chain, sendTransaction: async () => ({ receipt: { transactionHash: '0xabc' } }) });

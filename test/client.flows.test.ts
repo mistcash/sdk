@@ -223,8 +223,10 @@ describe('MistClient flows', () => {
     // Chamber.deposit returns (noteHash, depositId), which a mined receipt does
     // not carry; NoteAppended does, with the leaf's global index, which picks
     // the tx tree a later spend must prove against.
+    // A token log, and a Chamber log this ABI cannot decode, come first.
+    const unknown = { address: BOOK.chamber, topics: [`0x${'ee'.repeat(32)}` as Hex], data: '0x' as Hex };
     const { chain, sent } = mockChain({
-      respond: () => ({ logs: [appendedLog(1n, 1n, BOOK.token), appendedLog(5n, 4242n)] }),
+      respond: () => ({ logs: [appendedLog(1n, 1n, BOOK.token), unknown, appendedLog(5n, 4242n)] }),
     });
     const client = makeClient({ chain });
 
