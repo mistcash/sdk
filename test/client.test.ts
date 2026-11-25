@@ -18,6 +18,7 @@ function mockChain(seen: string[]): ChainAdapter {
       if (fn === 'reserveConfigs') return [0n, 7n, 0n];
       if (fn === 'registeredUsersCount') return 0n;
       if (fn === 'reserveAssetMinDeposit') return 1n;
+      if (fn === 'isValidZkStateRoot') return true;
       return 0n;
     },
     sendTransaction: async (tx) => {

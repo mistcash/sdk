@@ -364,6 +364,7 @@ export class MistClient {
     const reserve = opts.reserve ?? this.defaultReserve();
     const amount = opts.amount + (opts.withdraw ?? 0n);
     if ((opts.withdraw ?? 0n) > 0n && !opts.withdrawTo) throw new Error('withdrawTo is required for withdrawals');
+    if (await this.chain.readContract(this.book.chamber, 'spendsPaused')) throw new Error('Spends are paused.');
     // Fetched state proves against the selected notes' own tx tree; injected
     // state brings its own leaves.
     const txTreeCapacity = opts.state ? undefined : await this.txTreeCapacity();
@@ -376,6 +377,11 @@ export class MistClient {
 
     const owner = await this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
+    // At a reserve with members the prover needs this member's leaf, which
+    // Reserve.removeUser zeroes.
+    if (ukx !== '0' && st.userLeaves.length && !st.userLeaves.includes(String(await this.prover.hash2(owner, ukx)))) {
+      throw new Error('This reserve no longer lists you as a member: join it again.');
+    }
     // Re-read the store before drawing: another live client sharing it may have
     // used an index since our last restore. A failed read falls back to memory.
     if (opts.keyIndex === undefined && ukx !== '0') await this.restoreKeyIndices().catch(() => {});
@@ -405,6 +411,10 @@ export class MistClient {
     this.progress('Proving in your browser');
     const { res, secs } = await proveSpend(this.prover, req);
     this.callbacks.onProof?.({ kind: 'spend', secs });
+    // A superseded zkState root is accepted for ZK_STATE_ROOT_GRACE only.
+    if (!(await this.chain.readContract(this.book.chamber, 'isValidZkStateRoot', [BigInt(res.publicInputs[5])]))) {
+      throw new Error('The reserve state changed while proving: spend again.');
+    }
     this.progress(p.submitter === 'relayer' ? 'Relayer submitting' : 'Submitting');
     const { receipt } = await this.write(
       this.book.chamber,
@@ -617,12 +627,12 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     reserve: Hex,
     id: string,
   ): Promise<Omit<NonNullable<SpendOpts['state']>, 'txLeaves'>> {
-    const [stateLeaves, reserveCfg, users] = await Promise.all([
+    const [stateLeaves, reserveCfg, users, userLeaves] = await Promise.all([
       this.zkStateLeaves(),
       this.chain.readContract(this.book.chamber, 'reserveConfigs', [reserve]),
       this.chain.readContract(reserve, 'registeredUsersCount'),
+      this.registeredUserLeaves(reserve),
     ]);
-    const userLeaves = await this.chain.getEvents?.(reserve, 'UserRegistered', 0n).then((evts) => evts.map((e) => String(e.args['leaf']))) ?? [];
     const owner = await this.ownerFor(id).catch(() => '0');
     return {
       stateLeaves,
@@ -668,6 +678,24 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
       if (page.length < limit) break;
     }
     return leaves;
+  }
+
+  /**
+   * The reserve's registered-users leaves by index, with removed users zeroed
+   * as `Reserve.removeUser` leaves them: the `userLeaves` a spend proves
+   * against. Built from `UserRegistered` and `UserRemoved`, so it needs
+   * `ChainAdapter.getEvents` (empty without it).
+   */
+  async registeredUserLeaves(reserve: Hex): Promise<string[]> {
+    if (!this.chain.getEvents) return [];
+    const [added, removed] = await Promise.all([
+      this.chain.getEvents(reserve, 'UserRegistered', 0n),
+      this.chain.getEvents(reserve, 'UserRemoved', 0n),
+    ]);
+    const leaves: string[] = [];
+    for (const { args } of added) leaves[Number(args['index'])] = String(args['leaf']);
+    for (const { args } of removed) leaves[Number(args['index'])] = '0';
+    return Array.from(leaves, (leaf) => leaf ?? '0');
   }
 
   async zkStateLeaves(): Promise<string[]> {

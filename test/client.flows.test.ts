@@ -104,7 +104,11 @@ function mockChain(
     reserveCfg?: unknown;
     users?: bigint;
     withGetEvents?: boolean;
-    events?: Array<{ args: Record<string, unknown> }>;
+    /** getEvents results by event name. */
+    events?: Record<string, Array<{ args: Record<string, unknown> }>>;
+    spendsPaused?: boolean;
+    /** isValidZkStateRoot for every root. */
+    validRoot?: boolean;
     inflowsPaused?: boolean;
     /** reserveAssetMinDeposit; 0 means the token is not listed. */
     minDeposit?: bigint;
@@ -128,6 +132,8 @@ function mockChain(
       if (fn === 'reserveConfigs') return cfg.reserveCfg ?? [0n, 7n, 0n];
       if (fn === 'registeredUsersCount') return cfg.users ?? 0n;
       if (fn === 'inflowsPaused') return cfg.inflowsPaused ?? false;
+      if (fn === 'spendsPaused') return cfg.spendsPaused ?? false;
+      if (fn === 'isValidZkStateRoot') return cfg.validRoot ?? true;
       if (fn === 'reserveAssetMinDeposit') return cfg.minDeposit ?? 1n;
       return 0n;
     },
@@ -140,7 +146,7 @@ function mockChain(
   if (cfg.withGetEvents) {
     chain.getEvents = async (_address, eventName) => {
       if (!CORE_EVENTS.has(eventName)) throw new Error(`mockChain: event ${eventName} is not in CORE_ABI`);
-      return cfg.events ?? [];
+      return cfg.events?.[eventName] ?? [];
     };
   }
   return { chain, sent, reads };
@@ -607,7 +613,7 @@ describe('MistClient flows', () => {
       reserveCfg: [0n, 7n, 0n],
       users: 0n,
       withGetEvents: true,
-      events: [{ args: { leaf: 55n } }, { args: { leaf: 66n } }],
+      events: { UserRegistered: [{ args: { leaf: 55n, index: 0n } }, { args: { leaf: 66n, index: 1n } }] },
     });
     const { prover, requests } = mockProver();
     const client = makeClient({ chain, prover });
@@ -734,6 +740,75 @@ describe('MistClient flows', () => {
       ['received', '12', 10],
       ['change', '13', 11],
     ]);
+  });
+
+  it('spend refuses while spends are paused, before proving', async () => {
+    // The guardian can pause handleZkp for up to 3 days; a proof made now
+    // would only revert.
+    const { chain, sent } = mockChain({ spendsPaused: true });
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await expect(
+      client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, state: fixedState() }),
+    ).rejects.toThrow('Spends are paused.');
+    expect(requests).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  it('spend refuses to submit a proof whose zkState root the Chamber no longer accepts', async () => {
+    // A superseded root stays valid for 10 minutes; past that, or for a root
+    // the Chamber never had, handleZkp reverts with "invalid state root".
+    const { chain, sent, reads } = mockChain({ validRoot: false });
+    const { prover, requests } = mockProver({ commitments: () => ['999'] });
+    const client = makeClient({ chain, prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await expect(
+      client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, keyIndex: 4, state: fixedState({ ukx: '555' }) }),
+    ).rejects.toThrow('The reserve state changed while proving: spend again.');
+    expect(requests).toHaveLength(1);
+    expect(sent).toEqual([]);
+    // stateRoot is publicInputs[5] ('15' from the mock prover).
+    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'isValidZkStateRoot', args: [15n] });
+    // Nothing reached the chain, so the key index stays free and no note moved.
+    expect(client.usedKeyIndices.get('555')?.has(4) ?? false).toBe(false);
+    expect(client.notes.filter((x) => x.spent)).toEqual([]);
+  });
+
+  it('UserLeaves zero a removed user in place', async () => {
+    // Reserve.removeUser zeroes the leaf at its index; the prover rebuilds
+    // the users root from these leaves, so dropping or keeping the removed
+    // leaf would both give a root the Chamber never had.
+    const { chain } = mockChain({
+      withGetEvents: true,
+      txLeaves: [11n],
+      events: {
+        UserRegistered: [{ args: { leaf: 77n, index: 2n } }, { args: { leaf: 55n, index: 0n } }, { args: { leaf: 66n, index: 1n } }],
+        UserRemoved: [{ args: { index: 1n, leaf: 66n } }],
+      },
+    });
+    const client = makeClient({ chain });
+
+    expect(await client.registeredUserLeaves(BOOK.reserve)).toEqual(['55', '0', '77']);
+    expect(await makeClient().registeredUserLeaves(BOOK.reserve)).toEqual([]);
+  });
+
+  it('spend refuses a member whose leaf the reserve no longer lists', async () => {
+    // After removeUser the prover finds no leaf for H2(owner, ukx); say why
+    // instead of failing inside the witness builder.
+    const { prover, requests } = mockProver();
+    const client = makeClient({ prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    const spend = (userLeaves: string[]) =>
+      client.spend({ id: 'alice', amount: 10n, to: 'bob', reserve: BOOK.reserve, state: fixedState({ ukx: '555', userLeaves }) });
+
+    // The mock hash2 makes every leaf H2(owner, ukx) = '123'.
+    await expect(spend(['55', '0'])).rejects.toThrow('This reserve no longer lists you as a member: join it again.');
+    expect(requests).toEqual([]);
+    await spend(['55', '123']);
+    expect(requests).toHaveLength(1);
   });
 
   it('spendState falls back to owner 0 when identity resolution throws', async () => {
