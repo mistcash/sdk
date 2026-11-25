@@ -41,14 +41,18 @@ const chain: ChainAdapter = {
   sendTransaction: async (tx) => {
     const hash = await walletClient.sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    // Pass the logs through: deposit() reads DepositQueued from them.
+    // Pass the logs through: deposit() and spend() read the Chamber's
+    // NoteAppended and DepositQueued events from them.
     return { hash, receipt: { transactionHash: hash, gasUsed: receipt.gasUsed, status: receipt.status, logs: receipt.logs } };
   },
+  // UserRegistered/UserRemoved (the users tree a spend proves against), DepositQueued.
   getEvents: (address, eventName, fromBlock) =>
     publicClient.getLogs({ address, event: abi.find((i) => i.type === 'event' && i.name === eventName) as never, fromBlock }),
 };
 
 // Addresses from the deployment (core-deploy/dist/deployments/<chainId>.json).
+// On a local core-deploy (`scripts/deploy.sh deploy`) the deployer is the
+// fixture reserve's admin, the registrar holds USERS and the token is listed.
 const book: AddressBook = { chamber: '0x...', registrar: '0x...', reserve: '0x...', token: '0x...', verifier: '0x...' };
 
 const prover = await loadProver(); // reads wasm/mist.wasm from disk in Node
@@ -64,9 +68,9 @@ const client = new MistClient({
 });
 
 // Join the reserve: a reserve with members only lets members spend. The
-// manager's half (decapsulate, sign the membership leaf) normally runs in the
-// reserve manager's service; here the deployer is the manager, as on a local
-// core deploy (contracts/script/Deploy.s.sol).
+// reserve's half (decapsulate, sign the membership leaf) normally runs in the
+// reserve's service, signed by a holder of its USERS permission; here the
+// deployer is the reserve admin, which holds every permission.
 const manager = managerKeys(PRIVATE_KEY);
 await client.join({
   id: 'me (MIST)',
@@ -75,8 +79,11 @@ await client.join({
   managerSide: async ({ cipherText, reserve, mistAddr }) => {
     const ukx = deriveUkx(decapsulate(cipherText, manager.secretKey), reserve, mistAddr);
     const leaf = BigInt(await prover.hash2(mistAddr, ukx)); // H2(mistAddr, ukx); the ukx stays off-chain
-    const digest = await publicClient.readContract({ address: book.registrar, abi, functionName: 'registerUserDigest', args: [reserve, leaf] });
-    return { ukx, signature: await account.sign({ hash: digest }) }; // EIP-712, by the reserve manager
+    // The last valid second, in chain time. The digest binds the leaf's
+    // registration count, so read it just before signing.
+    const deadline = (await publicClient.getBlock()).timestamp + 3600n;
+    const digest = await publicClient.readContract({ address: book.registrar, abi, functionName: 'registerUserDigest', args: [reserve, leaf, deadline] });
+    return { ukx, signer: account.address, deadline, signature: await account.sign({ hash: digest }) }; // EIP-712 v2
   },
 });
 
@@ -85,6 +92,10 @@ const amount = 10n ** 18n; // amounts are uint64: see Caveats
 await client.deposit({ reserve: book.reserve, id: 'me (MIST)', amount, blinding: rand() });
 await client.spend({ id: 'me (MIST)', amount: 0n, withdraw: amount, withdrawTo: 'me', reserve: book.reserve });
 ```
+
+At core `cf1413d` Chamber's runtime code is over EIP-170's 24,576 bytes, so
+only a devnet takes it: run anvil with `--disable-code-size-limit` (core-deploy's
+`deploy.sh` does).
 
 ## Loading `mist.wasm`
 
@@ -244,19 +255,19 @@ what is proven: the proofs verify against the same `ChamberVerifier`.
 
 ## Screened reserves
 
-A reserve's manager can name a **screener** (core#157): deposits into that
-reserve are queued, and their notes enter the tx tree only after the
-screener approves them. The depositor can always reclaim a deposit that is
-pending or was rejected.
+A holder of a reserve's SCREENING permission can name a **screener**
+(core#157): deposits into that reserve are queued, and their notes enter a
+tx tree only after the screener approves them. A pending or rejected deposit
+can always be reclaimed.
 
 ```ts
-// Depositor
-const note = await client.deposit({ reserve, id, amount, blinding });
+// Depositor (refundTo is optional: who receives, and may trigger, a reclaim)
+const note = await client.deposit({ reserve, id, amount, blinding, refundTo });
 note.screening; // 'pending' at a screened reserve; note.depositId is set
 await client.refreshScreening(); // later: approved notes become spendable
 await client.reclaimDeposit(note.depositId!); // pending or rejected only
 
-// Reserve manager
+// SCREENING holder (Reserve.setScreener, which tells the Chamber)
 await client.setReserveScreener(reserve, screenerAddress); // zero = off
 
 // Screener (KYT bot, API relayer)
@@ -267,15 +278,60 @@ await client.rejectDeposits(bad.map((d) => d.depositId), evidenceHash);
 
 - Notes with `screening` set (`pending`, `rejected`, `reclaimed`) are never
   picked as spend inputs.
-- `deposit()` reads the deposit id from the `DepositQueued` log, so your
-  `sendTransaction` adapter must return `receipt.logs` (viem's receipt
-  logs as-is) for screened reserves.
+- `deposit()` reads the note hash, and the deposit id or tx index, from the
+  receipt's `DepositQueued` or `NoteAppended` log, so your `sendTransaction`
+  adapter must return `receipt.logs` (viem's receipt logs as-is), or a
+  `result` holding the call's `(noteHash, depositId)`.
 - `queuedDeposits()` needs `ChainAdapter.getEvents` for `DepositQueued`.
-- A batch reverts whole if any id is no longer pending (e.g. the depositor
-  reclaimed it), and an approval reverts with `transaction already exists`
-  on a duplicate note, so reject that id instead.
+- A batch skips ids that are no longer pending (e.g. reclaimed), and approval
+  rejects a deposit whose note is already in a tx tree
+  (`DepositDuplicateRejected`) instead of reverting.
+- `reclaimDeposit()` may be called by the depositor or the `refundTo`, and
+  always pays the `refundTo` (the depositor when none was named).
+- The screener is read when a deposit is decided: a new screener decides
+  every deposit still queued.
 - `evidence` is a `bytes32` commitment to your off-chain screening record
   (e.g. `keccak256` of the KYT report).
+
+## Reserve admin and permissions
+
+Each reserve has an **admin**, named at `registerReserve`, and four
+permissions (`RESERVE_ROLES`), each held by any number of accounts. The admin
+holds all four and grants or revokes them; every action is taken on the
+Reserve, which pushes the result to the Chamber.
+
+| Role | Lets an account | Client method |
+| --- | --- | --- |
+| `ASSETS` | list an asset with a minimum deposit, or delist it with 0 | `setAssetMinDeposit(reserve, asset, min)` |
+| `USERS` | add users (sign registrations) and remove them | `removeUser(reserve, index)`, `revokeRegistration(reserve, leaf, deadline)` |
+| `METADATA` | rotate the auditor key | `updateAuditorKey(reserve, keyHash, keyInputPoint)` |
+| `SCREENING` | set the deposit screener | `setReserveScreener(reserve, screener)` |
+
+```ts
+// Admin
+await client.grantPermission(reserve, 'USERS', book.registrar); // before anyone can join
+await client.grantPermission(reserve, 'USERS', signerService);   // whose join signatures count
+await client.setAssetMinDeposit(reserve, book.token, 10n ** 15n); // nothing is depositable until listed
+await client.revokePermission(reserve, 'USERS', signerService);
+await client.hasPermission(reserve, 'USERS', signerService); // false
+
+// Hand the reserve over in two steps; grants survive, so review them after.
+await client.transferAdmin(reserve, nextAdmin);
+await nextAdminClient.acceptAdmin(reserve);
+```
+
+- `join()` registers through `book.registrar`, which needs USERS itself and
+  accepts a signature only from a USERS holder (named as `signer`, ECDSA or
+  ERC-1271). A signature is good until its `deadline`, once: it binds the
+  leaf's registration count.
+- `revokeRegistration` kills one outstanding `(reserve, leaf, deadline)`
+  signature before it is used.
+- `removeUser(reserve, index)` zeroes a user's leaf (the index is in its
+  `UserRegistered` event; `registeredUserLeaves(reserve)` lists them). It
+  takes full effect within the 10-minute zkState root grace; removing the
+  last user reverts. A removed member's `spend()` fails with "This reserve no
+  longer lists you as a member: join it again."; re-joining needs a new
+  signature.
 
 ## Caveats
 
@@ -321,6 +377,31 @@ index that was already spent and the spend will revert on-chain. Indices are
 merged into the store rather than overwriting it, so two clients sharing one
 adapter — two tabs, for instance — do not erase each other's.
 
+### Paused Chamber
+
+The Chamber's guardian can pause inflows (`deposit`, `approveDeposits`) until
+unpaused, and spends for up to 3 days. `deposit()` then refuses with
+"Deposits are paused." before sending the approve, and `spend()` with "Spends
+are paused." before proving. `reclaimDeposit` and `rejectDeposits` never
+pause.
+
+`deposit()` also refuses, before the approve, a token the reserve has not
+listed and an amount below its minimum deposit.
+
+### Tx trees roll over
+
+The Chamber starts a new tx tree every `txTreeCapacity` (4^10) leaves, and a
+spend proves both inputs against one tree's root. Each note keeps its global
+`txIndex` (from `NoteAppended`, or looked up from its `hash`), `spend()` only
+pairs notes from one tree, and it hands the prover that tree's leaves alone
+(`txTreeLeaves(treeId)`). If you pass `state` yourself, `state.txLeaves` must
+be that one tree's leaves.
+
+A superseded zkState root stays valid for 10 minutes, so a proof made just
+before another reserve changes the root still lands. `spend()` checks the
+proof's root before submitting and fails with "The reserve state changed
+while proving: spend again." when the Chamber would reject it.
+
 ### uint64 amount limit
 
 The prover's `SpendNote.Amount` is `uint64`. At 18 decimals, a single note
@@ -357,14 +438,14 @@ CI runs `npm run verify`, real-wasm tests included, on every PR. Pushing a
 ## Architecture
 
 - **`identity`**: `secretOf`, `ownerOf`, `rand` — pure, injected hash
-- **`contracts`**: `CORE_ABI`, `ABIS`, `PUBLIC_INPUTS`, `AddressBook`
+- **`contracts`**: `CORE_ABI`, `ABIS`, `PUBLIC_INPUTS`, `RESERVE_ROLES`, `AddressBook`
 - **`pq`**: X-Wing key exchange (`managerKeys`, `encapsulate`, `deriveUkx`)
 - **`notes`**: `unspent`, `pick`, `plan` — pure selection logic (skips
-  screened deposits outside the tree)
+  screened deposits outside the tree, pairs notes from one tx tree)
 - **`proving`**: `buildSpendRequest`, `serializeSpendRequest`, `proveSpend`,
   `ProverAdapter`, `pickUnusedKeyIndex`
 - **`client`**: `MistClient` — stateful gateway (deposit, spend, join,
-  openPayload, deposit screening)
+  openPayload, deposit screening, reserve admin and permissions)
 - **`prover`** (subpath): `loadProver`, `createWorkerProver` (returns
   `terminate()`; without it the worker and its ~20 MB prover live for the page's
   lifetime; `{ webgpu: true }` proves on the GPU)

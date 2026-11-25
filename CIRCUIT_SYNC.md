@@ -19,6 +19,10 @@ then `handleZkp` reverts on-chain.
 | `OWNER_KEYWORD`, owner = `H2(secret, "owner")` | `hash.NativeMISTOwner` | `core/circuits/lib/hash` |
 | zkState leaf `H3(reserve, reserveConfig, usersRoot)`, user leaf `H2(owner, ukx)` | `NativeReserveStateLeaf`, `NativeRegisteredUserLeaf` | same |
 | `pick()` at most two inputs, two outputs | circuit arity `In1/In2`, `Out1/Out2` | `primary.go` |
+| `pick()` pairs notes from one tx tree; `spend()` sends that tree's leaves alone as `TxLeaves` (`txTreeLeaves`, tree `t` = `txArray[t * cap, (t + 1) * cap)`) | `Chamber._addNewTx` tree rollover at `txTreeCapacity()` (4^10); `handleZkp` checks `transactionsRoot` against every tx tree's roots | `core/contracts/src/Chamber.sol` |
+| `registeredUserLeaves()`: `UserLeaves` by index, removed users zeroed in place | `Reserve.addUser` appends, `Reserve.removeUser` zeroes the leaf | `core/contracts/src/Reserve.sol` |
+| `deposit()` refuses before the approve: paused inflows, unlisted token, below the minimum | the `require`s in `Chamber._deposit` (`inflowsPaused`, `reserveAssetMinDeposit`) | `core/contracts/src/Chamber.sol` |
+| `RESERVE_ROLES` = `keccak256(name)` for `ASSETS`, `USERS`, `METADATA`, `SCREENING` | `Reserve`'s role constants. `test/contracts.test.ts` checks the names against the generated ABI; the hashes are from source | `core/contracts/src/Reserve.sol` |
 | key index range `0..255` | `KeyIndexBits = 8` | `primary.go` |
 | `'mist/xwing/v1'`, `'mist/ukx/v1'` labels (`src/pq.ts`) | the manager and auditor tooling (`core-deploy/scripts/audit`, playground `pq.js`) | core-deploy |
 | `mist.wasm` + `wasm_exec.js` | the proving key behind the **deployed** `ChamberVerifier`; `wasm_exec.js` from the same Go toolchain that built the wasm | `core-deploy/scripts/build.sh` |
@@ -40,7 +44,7 @@ the ABIs.
 2. **Diff the interface surface**, not just the circuit:
 
    ```sh
-   git -C core diff OLD..NEW -- circuits/src/primary.go circuits/lib/hash contracts/src/Chamber.sol contracts/src/Reserve.sol
+   git -C core diff OLD..NEW -- circuits/src/primary.go circuits/lib/hash contracts/src/Chamber.sol contracts/src/Reserve.sol contracts/src/ManagerSigRegistrar.sol
    git diff OLD..NEW -- core-deploy/builders/wasm/main.go
    ```
 
