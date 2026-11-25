@@ -831,6 +831,36 @@ describe('MistClient flows', () => {
     expect(await makeClient().registeredUserLeaves(BOOK.reserve)).toEqual([]);
   });
 
+  it('registeredUserLeaves refuses a users tree with a missing registration', async () => {
+    // A hole (an adapter capped by block range, a lagging node) would be read
+    // as a zeroed user and give a users root the Chamber never had.
+    const { chain } = mockChain({
+      withGetEvents: true,
+      events: { UserRegistered: [{ args: { leaf: 55n, index: 0n } }, { args: { leaf: 77n, index: 2n } }] },
+    });
+    await expect(makeClient({ chain }).registeredUserLeaves(BOOK.reserve)).rejects.toThrow(
+      `MistClient: UserRegistered events are missing for reserve ${BOOK.reserve}`,
+    );
+  });
+
+  it("spend refuses before proving when it cannot read all of a reserve's users", async () => {
+    // registeredUsersCount counts every slot, removed ones included; fewer
+    // leaves than that (no getEvents, or missing trailing events) cannot prove.
+    for (const cfg of [{}, { withGetEvents: true, events: { UserRegistered: [{ args: { leaf: 55n, index: 0n } }] } }]) {
+      const { chain, sent } = mockChain({ ...cfg, users: 2n, txLeaves: [11n] });
+      const { prover, requests } = mockProver();
+      const client = makeClient({ chain, prover });
+      client.ukx[`${BOOK.reserve}:${ALICE_OWNER}`] = '555';
+      client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '11' }];
+
+      await expect(client.spend({ id: 'alice', amount: 10n, to: 'bob', reserve: BOOK.reserve })).rejects.toThrow(
+        /MistClient: read [01] of the reserve's 2 user leaves/,
+      );
+      expect(requests).toEqual([]);
+      expect(sent).toEqual([]);
+    }
+  });
+
   it('spend refuses a member whose leaf the reserve no longer lists', async () => {
     // After removeUser the prover finds no leaf for H2(owner, ukx); say why
     // instead of failing inside the witness builder.

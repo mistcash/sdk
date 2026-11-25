@@ -382,6 +382,12 @@ export class MistClient {
     const isMember = await this.isMember(reserve, opts.id);
     const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember, notes, txTreeCapacity });
     if ('error' in p) throw new Error(p.error);
+    // registeredUsersCount counts every slot, removed users included.
+    if (st.reserveUsers > 0n && BigInt(st.userLeaves.length) !== st.reserveUsers) {
+      throw new Error(
+        `MistClient: read ${st.userLeaves.length} of the reserve's ${st.reserveUsers} user leaves: ChainAdapter.getEvents must serve every UserRegistered and UserRemoved`,
+      );
+    }
     const txLeaves = opts.state?.txLeaves ?? (await this.txTreeLeaves(p.txTree!));
 
     const owner = await this.ownerFor(opts.id);
@@ -745,7 +751,8 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
    * The reserve's registered-users leaves by index, with removed users zeroed
    * as `Reserve.removeUser` leaves them: the `userLeaves` a spend proves
    * against. Built from `UserRegistered` and `UserRemoved`, so it needs
-   * `ChainAdapter.getEvents` (empty without it).
+   * `ChainAdapter.getEvents` (empty without it); throws on a missing
+   * registration.
    */
   async registeredUserLeaves(reserve: Hex): Promise<string[]> {
     if (!this.chain.getEvents) return [];
@@ -756,7 +763,8 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     const leaves: string[] = [];
     for (const { args } of added) leaves[Number(args['index'])] = String(args['leaf']);
     for (const { args } of removed) leaves[Number(args['index'])] = '0';
-    return Array.from(leaves, (leaf) => leaf ?? '0');
+    if (Object.keys(leaves).length !== leaves.length) throw new Error(`MistClient: UserRegistered events are missing for reserve ${reserve}`);
+    return leaves;
   }
 
   async zkStateLeaves(): Promise<string[]> {
