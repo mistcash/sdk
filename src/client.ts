@@ -66,6 +66,16 @@ export interface DepositOpts {
   blinding: string;
 }
 
+/** What the reserve's half of `join` returns: the ukx it derived, and a registrar signature over the leaf. */
+export interface ManagerApproval {
+  ukx: string;
+  /** The reserve's USERS holder that signed; the registrar checks its permission. */
+  signer: Hex;
+  /** Last valid timestamp (seconds, inclusive) the signature was made for. */
+  deadline: bigint;
+  signature: Hex;
+}
+
 export interface SpendOpts {
   /** Spending identity. */
   id: string;
@@ -236,12 +246,16 @@ export class MistClient {
     return receipt;
   }
 
-  /** Name (or clear, with the zero address) a reserve's screener. Manager only. */
+  /**
+   * Name (or clear, with the zero address) a reserve's screener
+   * (`Reserve.setScreener`, which pushes it to the Chamber). Needs the
+   * reserve's SCREENING permission.
+   */
   async setReserveScreener(reserve: Hex, screener: Hex): Promise<TxReceipt> {
     const { receipt } = await this.write(
-      this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName: 'setReserveScreener', args: [reserve, screener] }),
-      'setReserveScreener',
+      reserve,
+      encodeFunctionData({ abi: reserveAbi, functionName: 'setScreener', args: [screener] }),
+      'setScreener',
     );
     return receipt;
   }
@@ -383,36 +397,41 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   /**
    * Join a reserve through an X-Wing key exchange, then register the
    * membership leaf `H2(mistAddr, ukx)` through `book.registrar`
-   * (`ManagerSigRegistrar.registerUser(reserve, leaf, signature)`, which calls
-   * `Reserve.addUser`).
+   * (`ManagerSigRegistrar.registerUser(reserve, leaf, deadline, signer,
+   * signature)`, which calls `Reserve.addUser`).
    *
-   * `managerSide` runs the manager's half wherever the host provides it (this
+   * `managerSide` runs the reserve's half wherever the host provides it (this
    * tab plays both sides in the playground): decapsulate `cipherText`, derive
-   * the same ukx, compute `leaf = H2(mistAddr, ukx)`, and sign the EIP-712
-   * digest `registrar.registerUserDigest(reserve, leaf)` with the reserve
-   * manager's key (65-byte `r ++ s ++ v`). The ukx never goes on-chain: only
-   * the leaf does.
+   * the same ukx, compute `leaf = H2(mistAddr, ukx)`, and have a holder of the
+   * reserve's USERS permission sign the EIP-712 digest
+   * `registrar.registerUserDigest(reserve, leaf, deadline)` (65-byte
+   * `r ++ s ++ v`, or an ERC-1271 signature from a contract wallet). The
+   * digest binds the leaf's registration count, so read it just before
+   * signing. The ukx never goes on-chain: only the leaf does.
    */
   async join(opts: {
     id: string;
     reserve: Hex;
     managerPublicKey: Uint8Array;
-    /** The manager's half; usually a request to the reserve manager's service. */
-    managerSide: (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) =>
-      { ukx: string; signature: Hex } | Promise<{ ukx: string; signature: Hex }>;
+    /** The reserve's half; usually a request to the reserve's service. */
+    managerSide: (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) => ManagerApproval | Promise<ManagerApproval>;
   }): Promise<{ ukx: string }> {
     const { id, reserve } = opts;
     this.progress('Exchanging keys');
     const { cipherText, sharedSecret } = encapsulate(opts.managerPublicKey);
     const mistAddr = await this.ownerFor(id);
     const ukx = deriveUkx(sharedSecret, reserve, mistAddr);
-    const { ukx: managerUkx, signature } = await opts.managerSide({ cipherText, reserve, mistAddr });
+    const { ukx: managerUkx, signer, deadline, signature } = await opts.managerSide({ cipherText, reserve, mistAddr });
     if (ukx !== managerUkx) throw new Error('Client and manager derived different ukx values');
     this.progress('Registering');
     const leaf = BigInt(await this.prover.hash2(mistAddr, ukx));
     await this.write(
       this.book.registrar,
-      encodeFunctionData({ abi: managerSigRegistrarAbi, functionName: 'registerUser', args: [reserve, leaf, signature] }),
+      encodeFunctionData({
+        abi: managerSigRegistrarAbi,
+        functionName: 'registerUser',
+        args: [reserve, leaf, deadline, signer, signature],
+      }),
       'registerUser',
     );
     this.ukx[`${reserve}:${mistAddr}`] = ukx;
@@ -441,25 +460,6 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
       this.book.chamber,
       encodeFunctionData({ abi: chamberAbi, functionName: 'registerReserve', args: [manager, keyHash, keyInputPoint] }),
       'registerReserve',
-    );
-    return receipt;
-  }
-
-  async setVerifier(verifier: Hex): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName: 'setVerifier', args: [verifier] }), 'setVerifier',
-    );
-    return receipt;
-  }
-
-  /**
-   * Let `registrar` add members to `reserve` (`Reserve.setRegistrar`; reserve
-   * manager only). Defaults to `book.registrar`, the ManagerSigRegistrar that
-   * `join` registers through. The zero address closes registration.
-   */
-  async setRegistrar(reserve: Hex, registrar: Hex = this.book.registrar): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'setRegistrar', args: [registrar] }), 'setRegistrar',
     );
     return receipt;
   }

@@ -31,21 +31,24 @@ const OTHER_RESERVE = '0x7777777777777777777777777777777777777777' as Hex;
 const MIST_ADDR = '123';
 const ALICE_OWNER = BigInt(ALICE_ADDR).toString();
 
+// The registrar signature `managerSide` returns: who signed (a USERS holder
+// on the reserve) and the last second it is valid.
+const SIGNER = '0x9999999999999999999999999999999999999999' as Hex;
+const DEADLINE = 1_900_000_000n;
+
 // Decode ABIs matching what the client encodes. Every assertion below uses
 // distinct values per position, so any argument-order slip in client.ts shows
 // up as a mismatch here.
 const CHAMBER_MIN = [
   { type: 'function', name: 'handleZkp', stateMutability: 'nonpayable', inputs: [{ name: 'proof', type: 'uint256[8]' }, { name: 'input', type: 'uint256[14]' }, { name: 'auditorCommitments', type: 'uint256[]' }], outputs: [] },
-  { type: 'function', name: 'setVerifier', stateMutability: 'nonpayable', inputs: [{ name: 'verifier', type: 'address' }], outputs: [] },
 ] as const;
 
 const RESERVE_MIN = [
-  { type: 'function', name: 'setRegistrar', stateMutability: 'nonpayable', inputs: [{ name: 'registrar', type: 'address' }], outputs: [] },
   { type: 'function', name: 'updateAuditorKey', stateMutability: 'nonpayable', inputs: [{ name: 'keyHash', type: 'uint256' }, { name: 'keyInputPoint', type: 'uint256' }], outputs: [] },
 ] as const;
 
 const REGISTRAR_MIN = [
-  { type: 'function', name: 'registerUser', stateMutability: 'nonpayable', inputs: [{ name: 'reserve', type: 'address' }, { name: 'leaf', type: 'uint256' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'registerUser', stateMutability: 'nonpayable', inputs: [{ name: 'reserve', type: 'address' }, { name: 'leaf', type: 'uint256' }, { name: 'deadline', type: 'uint256' }, { name: 'signer', type: 'address' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
 ] as const;
 
 // What the client hands the prover. `serializeSpendRequest` emits bigints as
@@ -183,6 +186,8 @@ describe('MistClient flows', () => {
     const managerSide = vi.fn(
       (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) => ({
         ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+        signer: SIGNER,
+        deadline: DEADLINE,
         signature: '0xbeef' as Hex,
       }),
     );
@@ -201,8 +206,9 @@ describe('MistClient flows', () => {
     expect(sent[0].to).toBe(BOOK.registrar);
     const call = decodeFunctionData({ abi: REGISTRAR_MIN, data: sent[0].data });
     expect(call.functionName).toBe('registerUser');
-    // (reserve, leaf = H2(mistAddr, ukx), manager signature over that leaf).
-    expect(call.args).toEqual([BOOK.reserve, BigInt(LEAF), '0xbeef']);
+    // (reserve, leaf = H2(mistAddr, ukx), deadline, the USERS holder who
+    // signed, and its signature over registerUserDigest(reserve, leaf, deadline)).
+    expect(call.args).toEqual([BOOK.reserve, BigInt(LEAF), DEADLINE, SIGNER, '0xbeef']);
     // The ukx must never reach the chain: it derives every private tx key.
     expect(sent[0].data.toLowerCase()).not.toContain(BigInt(ukx).toString(16).padStart(64, '0'));
     expect(client.ukx[`${BOOK.reserve}:${MIST_ADDR}`]).toBe(ukx);
@@ -220,12 +226,44 @@ describe('MistClient flows', () => {
       managerPublicKey: manager.publicKey,
       managerSide: async (args) => ({
         ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+        signer: SIGNER,
+        deadline: DEADLINE,
         signature: '0xbeef' as Hex,
       }),
     });
 
     expect(sent).toHaveLength(1);
     expect(client.ukx[`${BOOK.reserve}:${MIST_ADDR}`]).toBe(ukx);
+  });
+
+  it('join records no membership when the registrar rejects the signature', async () => {
+    // An expired or revoked signature, or a signer without USERS, reverts
+    // registerUser. The client must not then believe it is a member: it
+    // would plan spends that the prover cannot build (no leaf on-chain).
+    const manager = managerKeys('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+    for (const reason of ['Registrar: signature expired', 'Registrar: signature revoked', 'Registrar: missing users permission']) {
+      const { chain } = mockChain();
+      chain.sendTransaction = async () => {
+        throw new Error(`execution reverted: ${reason}`);
+      };
+      const client = makeClient({ chain });
+
+      await expect(
+        client.join({
+          id: 'alice (MIST)',
+          reserve: BOOK.reserve,
+          managerPublicKey: manager.publicKey,
+          managerSide: (args) => ({
+            ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+            signer: SIGNER,
+            deadline: DEADLINE,
+            signature: '0xbeef' as Hex,
+          }),
+        }),
+      ).rejects.toThrow(reason);
+      expect(client.ukx).toEqual({});
+      expect(await client.isMember(BOOK.reserve, 'alice (MIST)')).toBe(false);
+    }
   });
 
   it('join refuses to register when the manager derives a different ukx', async () => {
@@ -241,7 +279,7 @@ describe('MistClient flows', () => {
         id: 'alice (MIST)',
         reserve: BOOK.reserve,
         managerPublicKey: manager.publicKey,
-        managerSide: () => ({ ukx: '1', signature: '0xbeef' as Hex }),
+        managerSide: () => ({ ukx: '1', signer: SIGNER, deadline: DEADLINE, signature: '0xbeef' as Hex }),
       }),
     ).rejects.toThrow('Client and manager derived different ukx values');
     expect(sent).toHaveLength(0);
@@ -620,42 +658,6 @@ describe('MistClient flows', () => {
   });
 
   // ── admin wrappers ───────────────────────────────────────────────────────
-
-  it('setVerifier pins its verifier argument', async () => {
-    const { chain, sent } = mockChain();
-    const client = makeClient({ chain });
-
-    const receipt = await client.setVerifier(BOOK.verifier);
-
-    expect(receipt.transactionHash).toBe('0xabc');
-    expect(sent[0].to).toBe(BOOK.chamber);
-    const call = decodeFunctionData({ abi: CHAMBER_MIN, data: sent[0].data });
-    expect(call.functionName).toBe('setVerifier');
-    expect(call.args).toEqual([BOOK.verifier]);
-  });
-
-  it('setRegistrar points the reserve at book.registrar by default', async () => {
-    const { chain, sent } = mockChain();
-    const client = makeClient({ chain });
-
-    await client.setRegistrar(BOOK.reserve);
-
-    expect(sent[0].to).toBe(BOOK.reserve);
-    const call = decodeFunctionData({ abi: RESERVE_MIN, data: sent[0].data });
-    expect(call.functionName).toBe('setRegistrar');
-    expect(call.args).toEqual([BOOK.registrar]);
-  });
-
-  it('setRegistrar takes another registrar, or zero to close registration', async () => {
-    const { chain, sent } = mockChain();
-    const client = makeClient({ chain });
-    const zero = '0x0000000000000000000000000000000000000000' as Hex;
-
-    await client.setRegistrar(BOOK.reserve, zero);
-
-    const call = decodeFunctionData({ abi: RESERVE_MIN, data: sent[0].data });
-    expect(call.args).toEqual([zero]);
-  });
 
   it('updateAuditorKey pins keyHash before keyInputPoint', async () => {
     const { chain, sent } = mockChain();

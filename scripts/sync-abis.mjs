@@ -40,13 +40,18 @@ const CONTRACTS = [
   ['ERC20', 'deps/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol:ERC20', 'erc20Abi'],
 ];
 
-/** SCREENING_ABI: deposit screening (core#157), all on Chamber. */
+/**
+ * SCREENING_ABI: deposit screening (core#157): the queue on Chamber, and the
+ * screener, which a SCREENING holder sets on the Reserve.
+ */
 const SCREENING = [
   ['Chamber', [
-    'setReserveScreener', 'reserveScreeners', 'depositCount', 'pendingDeposits',
+    'reserveScreeners', 'depositCount', 'pendingDeposits',
     'approveDeposits', 'rejectDeposits', 'reclaimDeposit',
-    'ReserveScreenerSet', 'DepositQueued', 'DepositApproved', 'DepositRejected', 'DepositReclaimed',
+    'ReserveScreenerSet', 'DepositQueued', 'DepositApproved', 'DepositRejected', 'DepositDuplicateRejected',
+    'DepositReclaimed',
   ]],
+  ['Reserve', ['setScreener']],
 ];
 
 /**
@@ -55,16 +60,19 @@ const SCREENING = [
  */
 const CORE_SUBSET = [
   ['Chamber', [
-    'owner', 'verifier', 'merkleRoot', 'zkStateRoot', 'zkStateLeaf', 'getTxArray', 'reserveConfigs',
-    'registerReserve', 'setVerifier', 'deposit', 'handleZkp',
+    'owner', 'verifier', 'merkleRoot', 'zkStateRoot', 'zkStateLeaf', 'isValidZkStateRoot',
+    'getTxArray', 'txTreeCapacity', 'noteIndexPlusOne', 'reserveConfigs', 'reserveAssetMinDeposit',
+    'inflowsPaused', 'spendsPaused', 'registerReserve', 'deposit', 'handleZkp',
   ]],
   ['Reserve', [
-    'reserveManager', 'auditorKey', 'registeredUsersRoot', 'registeredUsersCount',
-    'registrar', 'setRegistrar', 'updateAuditorKey',
+    'admin', 'auditorKey', 'registeredUsersRoot', 'registeredUsersCount', 'hasPermission',
+    'grantPermission', 'revokePermission', 'transferAdmin', 'acceptAdmin',
+    'setAssetMinDeposit', 'updateAuditorKey', 'removeUser',
   ]],
-  ['ManagerSigRegistrar', ['registerUser', 'registerUserDigest']],
+  ['ManagerSigRegistrar', ['registerUser', 'registerUserDigest', 'revoke']],
   ['ERC20', ['symbol', 'balanceOf', 'approve', 'transfer']],
-  ['Reserve', ['UserRegistered']],
+  ['Chamber', ['NoteAppended']],
+  ['Reserve', ['UserRegistered', 'UserRemoved']],
 ];
 
 function run(cmd, args, opts = {}) {

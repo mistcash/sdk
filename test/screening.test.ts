@@ -130,11 +130,14 @@ describe('deposit screening', () => {
     expect(note.screening).toBe('reclaimed');
   });
 
-  it('sets a reserve screener', async () => {
+  it('sets a reserve screener on the reserve, which pushes it to the Chamber', async () => {
+    // Chamber.setReserveScreener now accepts only a registered Reserve; a
+    // SCREENING holder calls Reserve.setScreener instead.
     const env = screenedChain();
     await client(env.chain).setReserveScreener(BOOK.reserve, SCREENER);
+    expect(env.sent[0].to).toBe(BOOK.reserve);
     expect(decodeFunctionData({ abi: SCREENING, data: env.sent[0].data })).toEqual({
-      functionName: 'setReserveScreener', args: [BOOK.reserve, SCREENER],
+      functionName: 'setScreener', args: [SCREENER],
     });
   });
 
