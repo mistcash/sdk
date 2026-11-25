@@ -177,11 +177,15 @@ export class MistClient {
     const commitment = BigInt(await this.prover.hash2(blinding, owner));
     await this.assertDepositable(reserve, amount);
     this.progress('Approving');
-    await this.write(
+    const approved = await this.write(
       this.book.token,
       encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [reserve, amount] }),
       'approve',
     );
+    // The deposit's note is read from its logs or result: stop while no funds have moved.
+    if (!approved.receipt.logs && approved.result === undefined) {
+      throw new Error('MistClient: deposit() needs sendTransaction to return receipt.logs (or the call result); nothing was deposited');
+    }
     this.progress('Depositing');
     const args = [reserve, commitment, amount, this.book.token] as const;
     const { receipt, result } = await this.write(

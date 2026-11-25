@@ -104,8 +104,12 @@ describe('deposit screening', () => {
 
   it('throws when a screened deposit receipt has no DepositQueued', async () => {
     const { chain } = screenedChain();
-    const c = client({ ...chain, sendTransaction: async () => ({ receipt: { transactionHash: '0xabc' } }) });
-    await expect(c.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(/DepositQueued/);
+    // The adapter passes logs, but none from the Chamber.
+    const c = client({ ...chain, sendTransaction: async () => ({ receipt: { transactionHash: '0xabc', logs: [] } }) });
+    await expect(c.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'no NoteAppended or DepositQueued log',
+    );
+    expect(c.notes).toEqual([]);
   });
 
   it('reads a queue entry', async () => {

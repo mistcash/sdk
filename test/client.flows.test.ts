@@ -266,13 +266,28 @@ describe('MistClient flows', () => {
     });
   });
 
-  it('deposit throws when neither the receipt nor the result names the note', async () => {
+  it('deposit refuses to send the deposit when the adapter reports neither logs nor results', async () => {
     // Without the hash the note cannot be located in a tx tree, so it could
-    // never be spent; fail loudly (the caller still holds the blinding).
-    const client = makeClient({ chain: mockChain({ respond: () => ({}) }).chain });
+    // never be spent. The approve's receipt shows what the adapter reports,
+    // so stop there: no funds have moved yet.
+    const { chain, sent } = mockChain({ respond: () => ({}) });
+    const client = makeClient({ chain });
     await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
-      /receipt\.logs/,
+      /return receipt\.logs.*nothing was deposited/,
     );
+    expect(sent.map((t) => t.to)).toEqual([BOOK.token]);
+    expect(client.notes).toEqual([]);
+  });
+
+  it('deposit throws when a sent deposit names no note', async () => {
+    // The adapter passes logs, but the deposit's receipt has none of the
+    // Chamber's (e.g. a filtered log set): say so rather than keep a hashless note.
+    const { chain, sent } = mockChain({ respond: () => ({ logs: [] }) });
+    const client = makeClient({ chain });
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      /no NoteAppended or DepositQueued log/,
+    );
+    expect(sent).toHaveLength(2);
     expect(client.notes).toEqual([]);
   });
 
