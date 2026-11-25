@@ -2940,6 +2940,7 @@ export const coreAbiHumanReadable = [
   "function zkStateLeaf(uint256 index) view returns (uint256)",
   "function isValidZkStateRoot(uint256 root) view returns (bool)",
   "function getTxArray(uint256 offset, uint256 limit) view returns (uint256[] page)",
+  "function txCount() view returns (uint256)",
   "function txTreeCapacity() view returns (uint256)",
   "function noteIndexPlusOne(uint256 note) view returns (uint256 indexPlusOne)",
   "function reserveConfigs(address) view returns (uint256 leafIndex, uint256 reserveConfig, uint256 stateRoot)",

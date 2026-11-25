@@ -735,17 +735,24 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
 
   /**
    * Every leaf of tx tree `treeId`, the `txLeaves` a spend of its notes
-   * proves against, paged through `getTxArray(offset, limit)`.
+   * proves against, read through `getTxArray(offset, limit)` in pages of
+   * `TX_PAGE`, `TX_READS` at a time.
    */
   async txTreeLeaves(treeId: number): Promise<string[]> {
-    const capacity = await this.txTreeCapacity();
+    const [capacity, count] = await Promise.all([
+      this.txTreeCapacity(),
+      this.chain.readContract(this.book.chamber, 'txCount').then((n) => BigInt(n as bigint)),
+    ]);
     const start = BigInt(treeId) * BigInt(capacity);
+    const end = count < start + BigInt(capacity) ? count : start + BigInt(capacity);
+    const pages: Array<[bigint, bigint]> = [];
+    for (let at = start; at < end; at += TX_PAGE) pages.push([at, end - at < TX_PAGE ? end - at : TX_PAGE]);
     const leaves: string[] = [];
-    while (leaves.length < capacity) {
-      const limit = Math.min(TX_PAGE, capacity - leaves.length);
-      const page = (await this.chain.readContract(this.book.chamber, 'getTxArray', [start + BigInt(leaves.length), BigInt(limit)])) as bigint[];
-      leaves.push(...page.map(String));
-      if (page.length < limit) break;
+    for (let i = 0; i < pages.length; i += TX_READS) {
+      const batch = await Promise.all(
+        pages.slice(i, i + TX_READS).map((args) => this.chain.readContract(this.book.chamber, 'getTxArray', args) as Promise<bigint[]>),
+      );
+      for (const page of batch) leaves.push(...page.map(String));
     }
     return leaves;
   }
@@ -783,5 +790,8 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
 
 const DEPOSIT_STATUS: DepositStatus[] = ['none', 'pending', 'rejected'];
 
-/** Leaves per `getTxArray` read: 128 KiB of return data. */
-const TX_PAGE = 4096;
+/** Leaves per `getTxArray` read: about 2.3M gas of storage reads, under common eth_call caps. */
+const TX_PAGE = 1024n;
+
+/** `getTxArray` reads in flight at once. */
+const TX_READS = 8;

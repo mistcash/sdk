@@ -61,7 +61,7 @@ const SCREENING = [
 const CORE_SUBSET = [
   ['Chamber', [
     'owner', 'verifier', 'merkleRoot', 'zkStateRoot', 'zkStateLeaf', 'isValidZkStateRoot',
-    'getTxArray', 'txTreeCapacity', 'noteIndexPlusOne', 'reserveConfigs', 'reserveAssetMinDeposit',
+    'getTxArray', 'txCount', 'txTreeCapacity', 'noteIndexPlusOne', 'reserveConfigs', 'reserveAssetMinDeposit',
     'inflowsPaused', 'spendsPaused', 'registerReserve', 'deposit', 'handleZkp',
   ]],
   ['Reserve', [

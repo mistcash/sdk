@@ -127,6 +127,7 @@ function mockChain(
         return (cfg.txLeaves ?? []).slice(Number(offset), Number(offset + limit));
       }
       if (fn === 'txTreeCapacity') return cfg.capacity ?? 4n ** 10n;
+      if (fn === 'txCount') return BigInt((cfg.txLeaves ?? []).length);
       if (fn === 'noteIndexPlusOne') return BigInt((cfg.txLeaves ?? []).indexOf(args?.[0] as bigint) + 1);
       if (fn === 'zkStateLeaf') return cfg.stateLeaves?.[Number(args?.[0] ?? 0)] ?? 0n;
       if (fn === 'reserveConfigs') return cfg.reserveCfg ?? [0n, 7n, 0n];
@@ -646,7 +647,7 @@ describe('MistClient flows', () => {
     expect(req.ReserveConfig).toBe('7');
     expect(req.Reserve).toBe(BOOK.reserve);
     expect(reads.filter((r) => r.fn === 'zkStateLeaf').map((r) => r.args[0])).toEqual([0n, 1n, 2n]);
-    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'getTxArray', args: [0n, 4096n] });
+    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'getTxArray', args: [0n, 2n] });
     expect(reads.some((r) => r.fn === 'reserveConfigs' && r.address === BOOK.chamber && r.args[0] === BOOK.reserve)).toBe(true);
     expect(reads.some((r) => r.fn === 'registeredUsersCount' && r.address === BOOK.reserve)).toBe(true);
   });
@@ -719,19 +720,21 @@ describe('MistClient flows', () => {
     expect(sent).toEqual([]);
   });
 
-  it('txTreeLeaves pages getTxArray and stops at the end of the tree', async () => {
-    // One eth_call per page: a full tree is 4^10 leaves, too many for one
-    // response.
+  it('txTreeLeaves pages getTxArray up to txCount, in order', async () => {
+    // A full tree is 4^10 leaves: too many for one eth_call, so 1024 per page
+    // (about 2.3M gas of storage reads), never past the last leaf.
     const txLeaves = Array.from({ length: 5000 }, (_, i) => BigInt(i + 1));
     const { chain, reads } = mockChain({ txLeaves, capacity: 8192n });
     const client = makeClient({ chain });
 
     const leaves = await client.txTreeLeaves(0);
 
-    expect(leaves).toHaveLength(5000);
-    expect(leaves.at(-1)).toBe('5000');
-    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[0n, 4096n], [4096n, 4096n]]);
+    expect(leaves).toEqual(txLeaves.map(String));
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([
+      [0n, 1024n], [1024n, 1024n], [2048n, 1024n], [3072n, 1024n], [4096n, 904n],
+    ]);
     expect(await client.txTreeLeaves(1)).toEqual([]);
+    expect(reads.filter((r) => r.fn === 'getTxArray')).toHaveLength(5);
   });
 
   it('txTreeLeaves never reads past its own tree', async () => {
@@ -741,7 +744,7 @@ describe('MistClient flows', () => {
 
     expect(await client.txTreeLeaves(1)).toEqual(['5', '6', '7', '8']);
     expect(await client.txTreeLeaves(2)).toEqual(['9', '10']);
-    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[4n, 4n], [8n, 4n]]);
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[4n, 4n], [8n, 2n]]);
     // Capacity is a Chamber constant: read once.
     expect(reads.filter((r) => r.fn === 'txTreeCapacity')).toHaveLength(1);
   });
