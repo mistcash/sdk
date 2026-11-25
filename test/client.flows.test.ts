@@ -6,8 +6,10 @@
 // fails here instead of on-chain.
 
 import { describe, expect, it, vi } from 'vitest';
-import { decodeFunctionData } from 'viem';
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, parseAbi } from 'viem';
 import { MistClient, type SpendOpts } from '../src/client.js';
+import { CORE_ABI } from '../src/contracts.js';
+import { chamberAbi } from '../src/abis.generated.js';
 import { OWNER_KEYWORD } from '../src/identity.js';
 import { decapsulate, deriveUkx, managerKeys } from '../src/pq.js';
 import type { ProverAdapter } from '../src/proving.js';
@@ -69,6 +71,24 @@ interface CapturedRequest {
   WithdrawTo: string;
 }
 
+// The README's adapter parses CORE_ABI for every read and event, so a name the
+// client uses outside it would only fail in a real host. The mock refuses it.
+const CORE = parseAbi(CORE_ABI) as unknown as Array<{ type: string; name?: string }>;
+const CORE_NAMES = (type: string) => new Set(CORE.filter((i) => i.type === type).map((i) => i.name));
+const CORE_FUNCTIONS = CORE_NAMES('function');
+const CORE_EVENTS = CORE_NAMES('event');
+
+type Log = { address: Hex; topics: Hex[]; data: Hex };
+
+/** A NoteAppended log as the Chamber emits it, one per appended leaf. */
+function appendedLog(index: bigint, note: bigint, address: Hex = BOOK.chamber): Log {
+  return {
+    address,
+    topics: encodeEventTopics({ abi: chamberAbi, eventName: 'NoteAppended', args: { index, note } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint256' }], [999n]),
+  };
+}
+
 // Like `client.test.ts`'s mockChain, but records both writes (for ABI
 // decoding) and reads (for the spendState path) and lets each test shape the
 // chain state. `withGetEvents` distinguishes an adapter that omits the
@@ -82,26 +102,38 @@ function mockChain(
     users?: bigint;
     withGetEvents?: boolean;
     events?: Array<{ args: Record<string, unknown> }>;
+    inflowsPaused?: boolean;
+    /** reserveAssetMinDeposit; 0 means the token is not listed. */
+    minDeposit?: bigint;
+    /** What sendTransaction resolves with, per transaction. */
+    respond?: (tx: { to: Hex; data: Hex }) => { logs?: Log[]; result?: unknown };
   } = {},
 ) {
   const sent: Array<{ to: Hex; data: Hex }> = [];
   const reads: Array<{ address: Hex; fn: string; args: unknown[] }> = [];
   const chain: ChainAdapter = {
     readContract: async (address, fn, args) => {
+      if (!CORE_FUNCTIONS.has(fn)) throw new Error(`mockChain: ${fn} is not in CORE_ABI`);
       reads.push({ address, fn, args: args ?? [] });
       if (fn === 'getTxArray') return cfg.txLeaves ?? [];
       if (fn === 'zkStateLeaf') return cfg.stateLeaves?.[Number(args?.[0] ?? 0)] ?? 0n;
       if (fn === 'reserveConfigs') return cfg.reserveCfg ?? [0n, 7n, 0n];
       if (fn === 'registeredUsersCount') return cfg.users ?? 0n;
+      if (fn === 'inflowsPaused') return cfg.inflowsPaused ?? false;
+      if (fn === 'reserveAssetMinDeposit') return cfg.minDeposit ?? 1n;
       return 0n;
     },
     sendTransaction: async (tx) => {
       sent.push({ to: tx.to, data: tx.data });
-      return { receipt: { transactionHash: '0xabc' }, result: 42n };
+      const { logs, result } = cfg.respond?.(tx) ?? { logs: [appendedLog(5n, 4242n)] };
+      return { receipt: { transactionHash: '0xabc', logs }, result };
     },
   };
   if (cfg.withGetEvents) {
-    chain.getEvents = async () => cfg.events ?? [];
+    chain.getEvents = async (_address, eventName) => {
+      if (!CORE_EVENTS.has(eventName)) throw new Error(`mockChain: event ${eventName} is not in CORE_ABI`);
+      return cfg.events ?? [];
+    };
   }
   return { chain, sent, reads };
 }
@@ -170,6 +202,98 @@ function fixedState(overrides: Partial<NonNullable<SpendOpts['state']>> = {}): N
 }
 
 describe('MistClient flows', () => {
+  // ── deposit ──────────────────────────────────────────────────────────────
+
+  it('deposit reads the note hash and its tx index from NoteAppended', async () => {
+    // Chamber.deposit returns (noteHash, depositId), which a mined receipt does
+    // not carry; NoteAppended does, with the leaf's global index, which picks
+    // the tx tree a later spend must prove against.
+    const { chain, sent } = mockChain({
+      respond: () => ({ logs: [appendedLog(1n, 1n, BOOK.token), appendedLog(5n, 4242n)] }),
+    });
+    const client = makeClient({ chain });
+
+    const note = await client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' });
+
+    expect(note).toMatchObject({ hash: '4242', txIndex: 5, kind: 'deposit' });
+    expect(note.screening).toBeUndefined();
+    expect(sent.map((t) => t.to)).toEqual([BOOK.token, BOOK.chamber]);
+    const call = decodeFunctionData({ abi: chamberAbi, data: sent[1].data });
+    expect(call.functionName).toBe('deposit');
+    // The commitment is H2(blinding, owner); the mock hash2 answers 123.
+    expect(call.args).toEqual([BOOK.reserve, 123n, 100n, BOOK.token]);
+  });
+
+  it('deposit names refundTo through the five-argument overload', async () => {
+    // refundTo receives (and may trigger) a reclaim of a screened deposit,
+    // so a router depositing for a user can name the user.
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+
+    await client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9', refundTo: BOB_ADDR });
+
+    const call = decodeFunctionData({ abi: chamberAbi, data: sent[1].data });
+    expect(call.args).toEqual([BOOK.reserve, 123n, 100n, BOOK.token, getAddress(BOB_ADDR)]);
+  });
+
+  it("deposit falls back to the call's (noteHash, depositId) result without logs", async () => {
+    const plain = makeClient({ chain: mockChain({ respond: () => ({ result: [4242n, 0n] }) }).chain });
+    const note = await plain.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' });
+    expect(note).toMatchObject({ hash: '4242' });
+    expect(note.screening).toBeUndefined();
+    expect(note.depositId).toBeUndefined();
+
+    const screened = makeClient({ chain: mockChain({ respond: () => ({ result: [4242n, 7n] }) }).chain });
+    expect(await screened.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).toMatchObject({
+      hash: '4242', screening: 'pending', depositId: '7',
+    });
+  });
+
+  it('deposit throws when neither the receipt nor the result names the note', async () => {
+    // Without the hash the note cannot be located in a tx tree, so it could
+    // never be spent; fail loudly (the caller still holds the blinding).
+    const client = makeClient({ chain: mockChain({ respond: () => ({}) }).chain });
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      /receipt\.logs/,
+    );
+    expect(client.notes).toEqual([]);
+  });
+
+  it('deposit refuses before approving while inflows are paused', async () => {
+    // The guardian's pause makes Chamber.deposit revert; checking first saves
+    // the approve and leaves no allowance behind.
+    const { chain, sent } = mockChain({ inflowsPaused: true });
+    const client = makeClient({ chain });
+
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'Deposits are paused.',
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it('deposit refuses a token the reserve has not listed', async () => {
+    const { chain, sent, reads } = mockChain({ minDeposit: 0n });
+    const client = makeClient({ chain });
+
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'This reserve does not accept this token.',
+    );
+    expect(sent).toEqual([]);
+    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'reserveAssetMinDeposit', args: [BOOK.reserve, BOOK.token] });
+  });
+
+  it("deposit refuses an amount below the reserve's minimum, and takes one at it", async () => {
+    const { chain, sent } = mockChain({ minDeposit: 100n });
+    const client = makeClient({ chain });
+
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 99n, blinding: '9' })).rejects.toThrow(
+      'The minimum deposit at this reserve is 100.',
+    );
+    expect(sent).toEqual([]);
+    await client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '8' });
+    expect(sent).toHaveLength(2);
+  });
+
   // ── join ─────────────────────────────────────────────────────────────────
 
   it('join derives a shared ukx, registers its leaf through the registrar, and records the exchange', async () => {

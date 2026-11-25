@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, parseAbi } from 'viem';
 import { MistClient } from '../src/client.js';
 import { SCREENING_ABI } from '../src/contracts.js';
+import { chamberAbi } from '../src/abis.generated.js';
 import type { ChainAdapter, Hex, SentTx } from '../src/types.js';
 
 const BOOK = {
@@ -32,6 +33,15 @@ function queuedLog(depositId: bigint, address: Hex = BOOK.chamber) {
   };
 }
 
+/** A NoteAppended log: what an unscreened deposit emits instead. */
+function appendedLog(index: bigint) {
+  return {
+    address: BOOK.chamber,
+    topics: encodeEventTopics({ abi: chamberAbi, eventName: 'NoteAppended', args: { index, note: NOTE } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint256' }], [1n]),
+  };
+}
+
 /** Chain with one screened reserve and a mutable queue/tree. */
 function screenedChain(opts: { screener?: Hex; queue?: Record<string, number>; tree?: bigint[]; reverts?: boolean } = {}) {
   const sent: Array<{ to: Hex; data: Hex }> = [];
@@ -48,12 +58,15 @@ function screenedChain(opts: { screener?: Hex; queue?: Record<string, number>; t
         return [ME, queue[id] ?? 0, BOOK.reserve, BOOK.token, 100n, NOTE];
       }
       if (fn === 'getTxArray') return tree;
+      if (fn === 'reserveAssetMinDeposit') return 1n;
       return 0n;
     },
     sendTransaction: async (tx): Promise<SentTx> => {
       sent.push(tx);
       const isDeposit = tx.to === BOOK.chamber && sent.length === 2;
-      return { receipt: { transactionHash: '0xabc', logs: isDeposit ? [queuedLog(99n, BOOK.token), queuedLog(7n)] : [] }, result: NOTE };
+      const screened = !opts.reverts && BigInt(opts.screener ?? SCREENER) !== 0n;
+      const logs = !isDeposit ? [] : screened ? [queuedLog(99n, BOOK.token), queuedLog(7n)] : [appendedLog(3n)];
+      return { receipt: { transactionHash: '0xabc', logs } };
     },
   };
   return { chain, sent, queue, tree };

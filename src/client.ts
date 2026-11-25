@@ -64,6 +64,11 @@ export interface DepositOpts {
   id: string;
   amount: bigint;
   blinding: string;
+  /**
+   * Who receives (and may trigger) a reclaim of a screened deposit; defaults
+   * to the sender. A router depositing for a user names the user.
+   */
+  refundTo?: Hex;
 }
 
 /** What the reserve's half of `join` returns: the ukx it derived, and a registrar signature over the leaf. */
@@ -156,14 +161,15 @@ export class MistClient {
    * Approve + deposit into a reserve vault. Returns the new local note. At a
    * screened reserve the note comes back `screening: 'pending'` with its
    * `depositId`, and is spendable only after `refreshScreening` sees it
-   * approved.
+   * approved. Refuses before approving while inflows are paused, or when the
+   * reserve does not list `book.token` or `amount` is below its minimum.
    */
   async deposit(opts: DepositOpts): Promise<Note> {
-    const { reserve, id, amount, blinding } = opts;
+    const { reserve, id, amount, blinding, refundTo } = opts;
     if (amount <= 0n) throw new Error('Enter a whole amount above zero.');
     const owner = await this.ownerFor(id);
-    const commitment = await this.prover.hash2(blinding, owner);
-    const screened = await this.isScreened(reserve);
+    const commitment = BigInt(await this.prover.hash2(blinding, owner));
+    await this.assertDepositable(reserve, amount);
     this.progress('Approving');
     await this.write(
       this.book.token,
@@ -171,19 +177,54 @@ export class MistClient {
       'approve',
     );
     this.progress('Depositing');
+    const args = [reserve, commitment, amount, this.book.token] as const;
     const { receipt, result } = await this.write(
       this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args: [reserve, BigInt(commitment), amount, this.book.token] }),
+      refundTo
+        ? encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args: [...args, refundTo] })
+        : encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args }),
       'deposit',
     );
-    const note: Note = { reserve, id, blinding, amount, hash: String(result ?? ''), kind: 'deposit' };
-    if (screened) {
-      const queued = this.queuedFrom(receipt);
-      if (!queued) throw new Error('MistClient: screened deposit sent, but its receipt has no DepositQueued log');
-      Object.assign(note, { hash: queued.noteHash, screening: 'pending', depositId: queued.depositId });
+    const placed = this.depositOutcome(receipt, result);
+    if (!placed) {
+      throw new Error(
+        'MistClient: deposit sent, but its receipt has no NoteAppended or DepositQueued log and no (noteHash, depositId) result: return receipt.logs from sendTransaction',
+      );
     }
+    const note: Note = { reserve, id, blinding, amount, kind: 'deposit', ...placed };
     this.notes.push(note);
     return note;
+  }
+
+  /** Chamber.deposit's own checks, made before the approve is sent. */
+  private async assertDepositable(reserve: Hex, amount: bigint): Promise<void> {
+    const [paused, min] = await Promise.all([
+      this.chain.readContract(this.book.chamber, 'inflowsPaused'),
+      this.chain.readContract(this.book.chamber, 'reserveAssetMinDeposit', [reserve, this.book.token]),
+    ]);
+    if (paused) throw new Error('Deposits are paused.');
+    const minDeposit = BigInt(min as bigint);
+    if (minDeposit === 0n) throw new Error('This reserve does not accept this token.');
+    if (amount < minDeposit) throw new Error(`The minimum deposit at this reserve is ${minDeposit}.`);
+  }
+
+  /**
+   * Where a deposit's note went: into the tx tree (`NoteAppended`), or the
+   * screening queue (`DepositQueued`). Falls back to the call's
+   * `(noteHash, depositId)` result for adapters that return it but no logs.
+   */
+  private depositOutcome(receipt: TxReceipt, result: unknown): Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'> | undefined {
+    for (const { eventName, args } of this.chamberEvents(receipt)) {
+      if (eventName === 'DepositQueued') return { hash: String(args.noteHash), screening: 'pending', depositId: String(args.depositId) };
+      if (eventName === 'NoteAppended') return { hash: String(args.note), txIndex: Number(args.index) };
+    }
+    if (Array.isArray(result) && result.length === 2) {
+      const [hash, depositId] = result as [bigint, bigint];
+      return BigInt(depositId) === 0n
+        ? { hash: String(hash) }
+        : { hash: String(hash), screening: 'pending', depositId: String(depositId) };
+    }
+    return undefined;
   }
 
   // ── Deposit screening ────────────────────────────────────────────────────
@@ -302,18 +343,18 @@ export class MistClient {
     return receipt;
   }
 
-  /** The `DepositQueued` the Chamber emitted in `receipt`, if any. */
-  private queuedFrom(receipt: TxReceipt): { depositId: string; noteHash: string } | undefined {
+  /** The Chamber events in `receipt`, in log order. */
+  private chamberEvents(receipt: TxReceipt) {
+    const events = [];
     for (const log of receipt.logs ?? []) {
       if (log.address.toLowerCase() !== this.book.chamber.toLowerCase()) continue;
       try {
-        const { eventName, args } = decodeEventLog({ abi: chamberAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
-        if (eventName === 'DepositQueued') return { depositId: String(args.depositId), noteHash: String(args.noteHash) };
+        events.push(decodeEventLog({ abi: chamberAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] }));
       } catch {
         // Not a Chamber event this ABI knows.
       }
     }
-    return undefined;
+    return events;
   }
 
   // ── Spend (send / withdraw) ──────────────────────────────────────────────

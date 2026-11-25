@@ -11,6 +11,12 @@ export interface Note {
   amount: bigint;
   /** On-chain note hash (deposit result or proof output). */
   hash?: string;
+  /**
+   * Global leaf index in Chamber's `txArray` (`NoteAppended.index`). Fixes
+   * the tx tree the note sits in, which a spend must prove against; looked
+   * up from `hash` when unset.
+   */
+  txIndex?: number;
   spent?: boolean;
   nullifier?: string;
   kind?: string;
