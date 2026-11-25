@@ -697,9 +697,12 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     };
   }
 
-  /** Chamber's tx tree capacity (4^10 in production); read once. */
+  /** Chamber's tx tree capacity (4^10 in production); read once, retried after a failure. */
   private txTreeCapacity(): Promise<number> {
-    this.capacity ??= this.chain.readContract(this.book.chamber, 'txTreeCapacity').then(Number);
+    this.capacity ??= this.chain.readContract(this.book.chamber, 'txTreeCapacity').then(Number, (e: unknown) => {
+      this.capacity = undefined;
+      throw e;
+    });
     return this.capacity;
   }
 

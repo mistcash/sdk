@@ -731,6 +731,24 @@ describe('MistClient flows', () => {
     expect(reads.filter((r) => r.fn === 'txTreeCapacity')).toHaveLength(1);
   });
 
+  it('a failed txTreeCapacity read is retried, not cached', async () => {
+    // One RPC blip must not break every later spend on this client.
+    const { chain } = mockChain({ txLeaves: [1n, 2n], capacity: 4n });
+    const read = chain.readContract;
+    let fail = true;
+    chain.readContract = async (address, fn, args) => {
+      if (fn === 'txTreeCapacity' && fail) {
+        fail = false;
+        throw new Error('RPC timeout');
+      }
+      return read(address, fn, args);
+    };
+    const client = makeClient({ chain });
+
+    await expect(client.txTreeLeaves(0)).rejects.toThrow('RPC timeout');
+    expect(await client.txTreeLeaves(0)).toEqual(['1', '2']);
+  });
+
   it("records the tx index of a spend's new notes from NoteAppended", async () => {
     // The prover's newNote1/newNote2 are publicInputs[2]/[3] ('12', '13').
     const { chain } = mockChain({ respond: () => ({ logs: [appendedLog(10n, 12n), appendedLog(11n, 13n)] }) });
