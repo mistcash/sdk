@@ -108,7 +108,7 @@ function mockChain(
     /** reserveAssetMinDeposit; 0 means the token is not listed. */
     minDeposit?: bigint;
     /** What sendTransaction resolves with, per transaction. */
-    respond?: (tx: { to: Hex; data: Hex }) => { logs?: Log[]; result?: unknown };
+    respond?: (tx: { to: Hex; data: Hex }) => { logs?: Log[]; result?: unknown; status?: 'success' | 'reverted' };
   } = {},
 ) {
   const sent: Array<{ to: Hex; data: Hex }> = [];
@@ -136,8 +136,8 @@ function mockChain(
     },
     sendTransaction: async (tx) => {
       sent.push({ to: tx.to, data: tx.data });
-      const { logs, result } = cfg.respond?.(tx) ?? { logs: [appendedLog(5n, 4242n)] };
-      return { receipt: { transactionHash: '0xabc', logs }, result };
+      const { logs, result, status } = cfg.respond?.(tx) ?? { logs: [appendedLog(5n, 4242n)] };
+      return { receipt: { transactionHash: '0xabc', logs, status }, result };
     },
   };
   if (cfg.withGetEvents) {
@@ -821,6 +821,46 @@ describe('MistClient flows', () => {
     // A withdrawal's first output is a zero-value dummy owned by 0: still fine.
     await client.spend({ id: 'alice', amount: 0n, withdraw: 40n, withdrawTo: 'bob', reserve: BOOK.reserve, state: fixedState() });
     expect(requests[0].Out[0]).toMatchObject({ id: null, Owner: '0', Amount: 0 });
+  });
+
+  it('a reverted receipt fails the call and records nothing', async () => {
+    // An adapter may return a mined-but-reverted receipt instead of
+    // throwing; the client must not then believe the call happened.
+    const reverted = () => ({ status: 'reverted' as const });
+
+    const spender = makeClient({ chain: mockChain({ respond: reverted }).chain, prover: mockProver({ commitments: () => ['999'] }).prover });
+    spender.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    await expect(
+      spender.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, keyIndex: 4, state: fixedState({ ukx: '555' }) }),
+    ).rejects.toThrow('MistClient: handleZkp reverted (0xabc)');
+    expect(spender.notes).toEqual([{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }]);
+    expect(spender.usedKeyIndices.get('555')?.has(4) ?? false).toBe(false);
+
+    const manager = managerKeys('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+    const joiner = makeClient({ chain: mockChain({ respond: reverted }).chain });
+    await expect(
+      joiner.join({
+        id: 'alice (MIST)',
+        reserve: BOOK.reserve,
+        managerPublicKey: manager.publicKey,
+        managerSide: (args) => ({
+          ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+          signer: SIGNER,
+          deadline: DEADLINE,
+          signature: '0xbeef' as Hex,
+        }),
+      }),
+    ).rejects.toThrow('MistClient: registerUser reverted');
+    expect(joiner.ukx).toEqual({});
+
+    const onTx = vi.fn();
+    const depositor = makeClient({ chain: mockChain({ respond: reverted }).chain, callbacks: { onTx } });
+    await expect(depositor.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'MistClient: approve reverted',
+    );
+    expect(depositor.notes).toEqual([]);
+    // onTx reports confirmed writes only, as when the adapter throws.
+    expect(onTx).not.toHaveBeenCalled();
   });
 
   it('spend refuses while spends are paused, before proving', async () => {

@@ -48,7 +48,11 @@ export interface PendingDeposit {
 export interface TxReceipt {
   transactionHash: Hex;
   gasUsed?: bigint;
-  status?: string;
+  /**
+   * viem's receipt status. A `'reverted'` receipt fails the call like a
+   * thrown error; an adapter that omits it must throw on a revert itself.
+   */
+  status?: 'success' | 'reverted';
   /** Raw logs; lets the client read ids the tx emitted (`DepositQueued`). */
   logs?: Array<{ address: Hex; topics: Hex[]; data: Hex }>;
 }

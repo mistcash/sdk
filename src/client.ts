@@ -150,6 +150,8 @@ export class MistClient {
     const veto = await this.callbacks.onBeforeSend?.({ to, data, functionName });
     if (veto === false) throw new Error(`MistClient: send of ${functionName} vetoed by onBeforeSend`);
     const sent = await this.chain.sendTransaction({ to, data });
+    // A mined revert must fail like a thrown one, before any local state moves.
+    if (sent.receipt.status === 'reverted') throw new Error(`MistClient: ${functionName} reverted (${sent.receipt.transactionHash})`);
     this.callbacks.onTx?.({ functionName, receipt: sent.receipt });
     return { receipt: sent.receipt, result: sent.result };
   }
