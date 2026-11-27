@@ -88,7 +88,7 @@ export interface SpendOpts {
   /** Spending identity. */
   id: string;
   amount: bigint;
-  /** Recipient identity for sends; null for withdrawals. */
+  /** Recipient identity, required when `amount` > 0; null for withdrawals (`amount` 0). */
   to?: string | null;
   withdraw?: bigint;
   withdrawTo?: string;
@@ -384,6 +384,7 @@ export class MistClient {
     const reserve = opts.reserve ?? this.defaultReserve();
     const amount = opts.amount + (opts.withdraw ?? 0n);
     if ((opts.withdraw ?? 0n) > 0n && !opts.withdrawTo) throw new Error('withdrawTo is required for withdrawals');
+    if (opts.amount > 0n && !opts.to) throw new Error('to is required to send an amount: a note with no owner can never be spent');
     if (await this.chain.readContract(this.book.chamber, 'spendsPaused')) throw new Error('Spends are paused.');
     // Fetched state proves against the selected notes' own tx tree, so it
     // needs each note's index; injected state brings its own leaves.

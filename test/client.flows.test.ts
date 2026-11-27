@@ -801,6 +801,28 @@ describe('MistClient flows', () => {
     ]);
   });
 
+  it('spend refuses an amount with no recipient, before proving', async () => {
+    // Output 1 goes to `to`; without one its owner is 0, which no proof or
+    // caller can ever authorize, so the amount would be burned.
+    const { chain, sent } = mockChain();
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await expect(client.spend({ id: 'alice', amount: 40n, reserve: BOOK.reserve, state: fixedState() })).rejects.toThrow(
+      'to is required to send an amount: a note with no owner can never be spent',
+    );
+    await expect(
+      client.spend({ id: 'alice', amount: 40n, to: null, withdraw: 10n, withdrawTo: 'bob', reserve: BOOK.reserve, state: fixedState() }),
+    ).rejects.toThrow('to is required');
+    expect(requests).toEqual([]);
+    expect(sent).toEqual([]);
+
+    // A withdrawal's first output is a zero-value dummy owned by 0: still fine.
+    await client.spend({ id: 'alice', amount: 0n, withdraw: 40n, withdrawTo: 'bob', reserve: BOOK.reserve, state: fixedState() });
+    expect(requests[0].Out[0]).toMatchObject({ id: null, Owner: '0', Amount: 0 });
+  });
+
   it('spend refuses while spends are paused, before proving', async () => {
     // The guardian can pause handleZkp for up to 3 days; a proof made now
     // would only revert.
@@ -991,7 +1013,7 @@ describe('MistClient flows', () => {
       { reserve: OTHER_RESERVE, id: 'alice', blinding: '2', amount: 100n },
     ];
 
-    await client.spend({ id: 'alice', amount: 10n, state: fixedState() });
+    await client.spend({ id: 'alice', amount: 10n, to: 'bob', state: fixedState() });
 
     expect(requests[0].Reserve).toBe(OTHER_RESERVE);
   });
@@ -1005,7 +1027,7 @@ describe('MistClient flows', () => {
     client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
 
     await expect(
-      client.spend({ id: 'alice', amount: 500n, reserve: BOOK.reserve, state: fixedState() }),
+      client.spend({ id: 'alice', amount: 500n, to: 'bob', reserve: BOOK.reserve, state: fixedState() }),
     ).rejects.toThrow('Your notes here hold 100.');
   });
 
@@ -1016,7 +1038,7 @@ describe('MistClient flows', () => {
     const client = makeClient({ chain });
     client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
 
-    await expect(client.spend({ id: 'alice', amount: 10n, reserve: BOOK.reserve })).rejects.toThrow(
+    await expect(client.spend({ id: 'alice', amount: 10n, to: 'bob', reserve: BOOK.reserve })).rejects.toThrow(
       'Reserve is members only: join it first.',
     );
   });

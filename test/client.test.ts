@@ -141,6 +141,7 @@ describe('MistClient', () => {
       await client.spend({
         id: 'alice',
         amount: 1n,
+        to: 'bob',
         reserve: BOOK.reserve,
         blindingA: '2',
         blindingB: '3',
