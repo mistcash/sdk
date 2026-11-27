@@ -68,8 +68,8 @@ export interface DepositOpts {
   amount: bigint;
   blinding: string;
   /**
-   * Who receives (and may trigger) a reclaim of a screened deposit; defaults
-   * to the sender. A router depositing for a user names the user.
+   * Who a rejected screened deposit refunds (and who may then reclaim it);
+   * defaults to the sender. A router depositing for a user names the user.
    */
   refundTo?: Hex;
 }
@@ -77,7 +77,7 @@ export interface DepositOpts {
 /** What the reserve's half of `join` returns: the ukx it derived, and a registrar signature over the leaf. */
 export interface ManagerApproval {
   ukx: string;
-  /** The reserve's USERS holder that signed; the registrar checks its permission. */
+  /** The reserve's USERS holder that signed, as named in the digest; the registrar checks its permission. */
   signer: Hex;
   /** Last valid timestamp (seconds, inclusive) the signature was made for. */
   deadline: bigint;
@@ -294,7 +294,11 @@ export class MistClient {
     return open;
   }
 
-  /** Take back a pending or rejected deposit: the depositor or its `refundTo` may call; `refundTo` is paid. */
+  /**
+   * Take back a queued deposit. A pending one returns to its depositor, who
+   * alone may call; a rejected one pays its `refundTo`, and the depositor or
+   * the `refundTo` may call.
+   */
   async reclaimDeposit(depositId: string | bigint): Promise<TxReceipt> {
     const { receipt } = await this.write(
       this.book.chamber,
@@ -303,6 +307,11 @@ export class MistClient {
     );
     for (const note of this.notes) if (note.depositId === String(depositId)) note.screening = 'reclaimed';
     return receipt;
+  }
+
+  /** Change a pending deposit's `refundTo`, who is paid if it is rejected. Depositor only. */
+  async setDepositRefundTo(depositId: string | bigint, refundTo: Hex): Promise<TxReceipt> {
+    return this.send(this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName: 'setDepositRefundTo', args: [BigInt(depositId), refundTo] }), 'setDepositRefundTo');
   }
 
   /**
@@ -485,10 +494,11 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
    * tab plays both sides in the playground): decapsulate `cipherText`, derive
    * the same ukx, compute `leaf = H2(mistAddr, ukx)`, and have a holder of the
    * reserve's USERS permission sign the EIP-712 digest
-   * `registrar.registerUserDigest(reserve, leaf, deadline)` (65-byte
+   * `registrar.registerUserDigest(reserve, leaf, signer, deadline)` (65-byte
    * `r ++ s ++ v`, or an ERC-1271 signature from a contract wallet). The
-   * digest binds the leaf's registration count, so read it just before
-   * signing. The ukx never goes on-chain: only the leaf does.
+   * digest binds the leaf's nonce, its revocation count and the signer's
+   * USERS epoch, so read it just before signing. The ukx never goes
+   * on-chain: only the leaf does.
    */
   async join(opts: {
     id: string;
@@ -594,11 +604,11 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   }
 
   /**
-   * Permanently revoke the registrar signature for `(reserve, leaf,
-   * deadline)` before it is used. Needs USERS on `reserve`.
+   * Revoke every outstanding registrar signature, by any signer, for `leaf`
+   * at `reserve`. Needs USERS on `reserve`.
    */
-  async revokeRegistration(reserve: Hex, leaf: bigint, deadline: bigint): Promise<TxReceipt> {
-    return this.send(this.book.registrar, encodeFunctionData({ abi: managerSigRegistrarAbi, functionName: 'revoke', args: [reserve, leaf, deadline] }), 'revoke');
+  async revokeRegistration(reserve: Hex, leaf: bigint): Promise<TxReceipt> {
+    return this.send(this.book.registrar, encodeFunctionData({ abi: managerSigRegistrarAbi, functionName: 'revoke', args: [reserve, leaf] }), 'revoke');
   }
 
   // ── State helpers ────────────────────────────────────────────────────────

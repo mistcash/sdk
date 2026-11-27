@@ -47,9 +47,9 @@ const CONTRACTS = [
 const SCREENING = [
   ['Chamber', [
     'reserveScreeners', 'depositCount', 'pendingDeposits',
-    'approveDeposits', 'rejectDeposits', 'reclaimDeposit',
+    'approveDeposits', 'rejectDeposits', 'reclaimDeposit', 'setDepositRefundTo',
     'ReserveScreenerSet', 'DepositQueued', 'DepositApproved', 'DepositRejected', 'DepositDuplicateRejected',
-    'DepositReclaimed',
+    'DepositReclaimed', 'DepositRefundToSet',
   ]],
   ['Reserve', ['setScreener']],
 ];

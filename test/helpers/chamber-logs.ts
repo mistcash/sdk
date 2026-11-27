@@ -18,7 +18,7 @@ export function noteAppendedLog(chamber: Hex, index: bigint, note: bigint): Log 
 /** `DepositQueued`: a screened deposit's note waiting on the screener. */
 export function depositQueuedLog(
   chamber: Hex,
-  e: { depositId: bigint; noteHash: bigint; reserve: Hex; depositor: Hex; asset: Hex; amount: bigint },
+  e: { depositId: bigint; noteHash: bigint; reserve: Hex; depositor: Hex; asset: Hex; amount: bigint; refundTo?: Hex },
 ): Log {
   return {
     address: chamber,
@@ -27,6 +27,9 @@ export function depositQueuedLog(
       eventName: 'DepositQueued',
       args: { depositId: e.depositId, reserve: e.reserve, depositor: e.depositor },
     }) as Hex[],
-    data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }], [e.noteHash, e.asset, e.amount]),
+    data: encodeAbiParameters(
+      [{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }],
+      [e.noteHash, e.asset, e.amount, e.refundTo ?? e.depositor],
+    ),
   };
 }

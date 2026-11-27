@@ -1084,15 +1084,29 @@ describe('MistClient flows', () => {
     expect(reads[0]).toEqual({ address: BOOK.reserve, fn: 'hasPermission', args: [RESERVE_ROLES.USERS, ALICE_ADDR] });
   });
 
-  it('revokeRegistration revokes one (reserve, leaf, deadline) signature at the registrar', async () => {
+  it("revokeRegistration revokes every outstanding signature for a leaf at the registrar", async () => {
+    // Registrar v3 counts revocations per (reserve, leaf) and signs over the
+    // count, so one call kills every signer's signature for that leaf.
     const { chain, sent } = mockChain();
     const client = makeClient({ chain });
 
-    await client.revokeRegistration(BOOK.reserve, 777n, DEADLINE);
+    await client.revokeRegistration(BOOK.reserve, 777n);
 
     expect(sent[0].to).toBe(BOOK.registrar);
     expect(decodeFunctionData({ abi: managerSigRegistrarAbi, data: sent[0].data })).toEqual({
-      functionName: 'revoke', args: [BOOK.reserve, 777n, DEADLINE],
+      functionName: 'revoke', args: [BOOK.reserve, 777n],
+    });
+  });
+
+  it("setDepositRefundTo names a pending deposit's new refundTo at the Chamber", async () => {
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+
+    await client.setDepositRefundTo(7n, SIGNER);
+
+    expect(sent[0].to).toBe(BOOK.chamber);
+    expect(decodeFunctionData({ abi: chamberAbi, data: sent[0].data })).toEqual({
+      functionName: 'setDepositRefundTo', args: [7n, SIGNER],
     });
   });
 
