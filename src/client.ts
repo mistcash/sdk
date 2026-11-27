@@ -558,19 +558,24 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     return Boolean(await this.chain.readContract(reserve, 'hasPermission', [RESERVE_ROLES[role], account]));
   }
 
-  /** Give `account` a permission on `reserve`. Admin only. */
+  /** Give `account` a permission on `reserve`. Admin only; the zero address reverts, a repeat grant is a no-op. */
   async grantPermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<TxReceipt> {
     return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'grantPermission', args: [RESERVE_ROLES[role], account] }), 'grantPermission');
   }
 
-  /** Take a granted permission back (never the admin's own). Admin only. */
+  /**
+   * Take a granted permission back (never the admin's own). Admin only. It
+   * moves the account's epoch for the role, so a USERS revoke also voids
+   * every registrar signature that account made.
+   */
   async revokePermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<TxReceipt> {
     return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'revokePermission', args: [RESERVE_ROLES[role], account] }), 'revokePermission');
   }
 
   /**
    * Nominate `newAdmin`, who takes over with `acceptAdmin`; the zero address
-   * cancels. Admin only. Grants survive the handover.
+   * cancels. Admin only. Explicit grants survive the handover; the old
+   * admin's implicit permissions, and its registrar signatures, do not.
    */
   async transferAdmin(reserve: Hex, newAdmin: Hex): Promise<TxReceipt> {
     return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'transferAdmin', args: [newAdmin] }), 'transferAdmin');
@@ -593,6 +598,7 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
    * Zero the user at `index` (from `UserRegistered`; see
    * `registeredUserLeaves`). Needs USERS. Takes full effect within the
    * Chamber's 10-minute zkState root grace; removing the last user reverts.
+   * It moves the leaf's nonce, so re-joining needs a new signature.
    */
   async removeUser(reserve: Hex, index: bigint): Promise<TxReceipt> {
     return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'removeUser', args: [index] }), 'removeUser');
