@@ -42,7 +42,8 @@ const chain: ChainAdapter = {
     const hash = await walletClient.sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     // Pass the logs through: deposit() and spend() read the Chamber's
-    // NoteAppended and DepositQueued events from them.
+    // NoteAppended and DepositQueued events from them. Pass the status too:
+    // a 'reverted' receipt fails the call (or throw on a revert yourself).
     return { hash, receipt: { transactionHash: hash, gasUsed: receipt.gasUsed, status: receipt.status, logs: receipt.logs } };
   },
   // UserRegistered/UserRemoved (the users tree a spend proves against), DepositQueued.
@@ -395,6 +396,21 @@ Skip it and every session starts with an empty set, so a reload can redraw an
 index that was already spent and the spend will revert on-chain. Indices are
 merged into the store rather than overwriting it, so two clients sharing one
 adapter — two tabs, for instance — do not erase each other's.
+
+### 256 spends per key exchange
+
+The key index is 8 bits (`KeyIndexBits = 8` in the circuit), so one key
+exchange covers 256 spends that publish auditor commitments: every spend at
+a reserve with members. Once all 256 are used, `spend()` throws "All 256 key
+indices used for this ukx". `join()` the reserve again for a fresh key
+exchange (a new leaf, and a new reserve signature) to keep spending. Spends
+at a reserve without members use no index.
+
+### Sends need a recipient
+
+`spend()` refuses a positive `amount` without `to`: that output would be owned
+by nobody and could never be spent. A withdrawal sends `amount: 0n` with
+`withdraw` and `withdrawTo`.
 
 ### Paused Chamber
 
