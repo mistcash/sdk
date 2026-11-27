@@ -79,11 +79,11 @@ await client.join({
   managerSide: async ({ cipherText, reserve, mistAddr }) => {
     const ukx = deriveUkx(decapsulate(cipherText, manager.secretKey), reserve, mistAddr);
     const leaf = BigInt(await prover.hash2(mistAddr, ukx)); // H2(mistAddr, ukx); the ukx stays off-chain
-    // The last valid second, in chain time. The digest binds the leaf's
-    // registration count, so read it just before signing.
+    // The last valid second, in chain time. The digest names the signer and
+    // binds nonces that move (see Reserve admin), so read it just before signing.
     const deadline = (await publicClient.getBlock()).timestamp + 3600n;
-    const digest = await publicClient.readContract({ address: book.registrar, abi, functionName: 'registerUserDigest', args: [reserve, leaf, deadline] });
-    return { ukx, signer: account.address, deadline, signature: await account.sign({ hash: digest }) }; // EIP-712 v2
+    const digest = await publicClient.readContract({ address: book.registrar, abi, functionName: 'registerUserDigest', args: [reserve, leaf, account.address, deadline] });
+    return { ukx, signer: account.address, deadline, signature: await account.sign({ hash: digest }) }; // EIP-712 v3
   },
 });
 
@@ -93,9 +93,10 @@ await client.deposit({ reserve: book.reserve, id: 'me (MIST)', amount, blinding:
 await client.spend({ id: 'me (MIST)', amount: 0n, withdraw: amount, withdrawTo: 'me', reserve: book.reserve });
 ```
 
-At core `cf1413d` Chamber's runtime code is over EIP-170's 24,576 bytes, so
+At core `fa7b92d` Chamber's runtime code is over EIP-170's 24,576 bytes, so
 only a devnet takes it: run anvil with `--disable-code-size-limit` (core-deploy's
-`deploy.sh` does).
+`deploy.sh` does). `Deploy.s.sol` deploys dev fixtures only on chain 31337 or
+Sepolia.
 
 ## Loading `mist.wasm`
 
@@ -258,12 +259,14 @@ what is proven: the proofs verify against the same `ChamberVerifier`.
 A holder of a reserve's SCREENING permission can name a **screener**
 (core#157): deposits into that reserve are queued, and their notes enter a
 tx tree only after the screener approves them. A pending or rejected deposit
-can always be reclaimed.
+can always be reclaimed: a pending one by its depositor, a rejected one by the
+depositor or its `refundTo`.
 
 ```ts
-// Depositor (refundTo is optional: who receives, and may trigger, a reclaim)
+// Depositor (refundTo is optional: who a rejected deposit refunds)
 const note = await client.deposit({ reserve, id, amount, blinding, refundTo });
 note.screening; // 'pending' at a screened reserve; note.depositId is set
+await client.setDepositRefundTo(note.depositId!, refundTo); // while pending, depositor only
 await client.refreshScreening(); // later: approved notes become spendable
 await client.reclaimDeposit(note.depositId!); // pending or rejected only
 
@@ -287,8 +290,9 @@ await client.rejectDeposits(bad.map((d) => d.depositId), evidenceHash);
 - A batch skips ids that are no longer pending (e.g. reclaimed), and approval
   rejects a deposit whose note is already in a tx tree
   (`DepositDuplicateRejected`) instead of reverting.
-- `reclaimDeposit()` may be called by the depositor or the `refundTo`, and
-  always pays the `refundTo` (the depositor when none was named).
+- Reclaiming a pending deposit is the depositor's alone and refunds the
+  depositor. A rejected deposit refunds its `refundTo` (the depositor when
+  none was named), and the depositor or the `refundTo` may reclaim it.
 - The screener is read when a deposit is decided: a new screener decides
   every deposit still queued.
 - `evidence` is a `bytes32` commitment to your off-chain screening record
@@ -304,7 +308,7 @@ Reserve, which pushes the result to the Chamber.
 | Role | Lets an account | Client method |
 | --- | --- | --- |
 | `ASSETS` | list an asset with a minimum deposit, or delist it with 0 | `setAssetMinDeposit(reserve, asset, min)` |
-| `USERS` | add users (sign registrations) and remove them | `removeUser(reserve, index)`, `revokeRegistration(reserve, leaf, deadline)` |
+| `USERS` | add users (sign registrations) and remove them | `removeUser(reserve, index)`, `revokeRegistration(reserve, leaf)` |
 | `METADATA` | rotate the auditor key | `updateAuditorKey(reserve, keyHash, keyInputPoint)` |
 | `SCREENING` | set the deposit screener | `setReserveScreener(reserve, screener)` |
 
@@ -316,17 +320,27 @@ await client.setAssetMinDeposit(reserve, book.token, 10n ** 15n); // nothing is 
 await client.revokePermission(reserve, 'USERS', signerService);
 await client.hasPermission(reserve, 'USERS', signerService); // false
 
-// Hand the reserve over in two steps; grants survive, so review them after.
+// Hand the reserve over in two steps. Explicit grants survive, so review them
+// after; the old admin's implicit permissions do not.
 await client.transferAdmin(reserve, nextAdmin);
 await nextAdminClient.acceptAdmin(reserve);
 ```
 
 - `join()` registers through `book.registrar`, which needs USERS itself and
   accepts a signature only from a USERS holder (named as `signer`, ECDSA or
-  ERC-1271). A signature is good until its `deadline`, once: it binds the
-  leaf's registration count.
-- `revokeRegistration` kills one outstanding `(reserve, leaf, deadline)`
-  signature before it is used.
+  ERC-1271). The EIP-712 v3 digest,
+  `registerUserDigest(reserve, leaf, signer, deadline)`, binds three nonces,
+  so a signature is good until its `deadline` and only while none moves:
+  - the leaf's nonce, which moves on every registration and removal (so a
+    signature works once, and a removed user needs a new one)
+  - the leaf's revocation count, moved by `revokeRegistration`
+  - the signer's USERS epoch, which moves when the signer loses USERS: a
+    `revokePermission`, or an admin handover for the old admin's implicit
+    permissions
+- `revokeRegistration(reserve, leaf)` voids every outstanding signature, by
+  any signer, for that leaf.
+- `grantPermission` reverts for the zero address; a repeat grant, or a revoke
+  without a grant, is a no-op.
 - `removeUser(reserve, index)` zeroes a user's leaf (the index is in its
   `UserRegistered` event; `registeredUserLeaves(reserve)` lists them). A
   spend at a reserve with members proves against every slot, so
