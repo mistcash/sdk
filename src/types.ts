@@ -11,6 +11,12 @@ export interface Note {
   amount: bigint;
   /** On-chain note hash (deposit result or proof output). */
   hash?: string;
+  /**
+   * Global leaf index in Chamber's `txArray` (`NoteAppended.index`). Fixes
+   * the tx tree the note sits in, which a spend must prove against; looked
+   * up from `hash` when unset.
+   */
+  txIndex?: number;
   spent?: boolean;
   nullifier?: string;
   kind?: string;
@@ -42,7 +48,11 @@ export interface PendingDeposit {
 export interface TxReceipt {
   transactionHash: Hex;
   gasUsed?: bigint;
-  status?: string;
+  /**
+   * viem's receipt status. A `'reverted'` receipt fails the call like a
+   * thrown error; an adapter that omits it must throw on a revert itself.
+   */
+  status?: 'success' | 'reverted';
   /** Raw logs; lets the client read ids the tx emitted (`DepositQueued`). */
   logs?: Array<{ address: Hex; topics: Hex[]; data: Hex }>;
 }

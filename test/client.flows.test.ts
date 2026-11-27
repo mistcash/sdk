@@ -6,12 +6,15 @@
 // fails here instead of on-chain.
 
 import { describe, expect, it, vi } from 'vitest';
-import { decodeFunctionData } from 'viem';
+import { decodeFunctionData, getAddress, parseAbi } from 'viem';
 import { MistClient, type SpendOpts } from '../src/client.js';
+import { CORE_ABI, RESERVE_ROLES } from '../src/contracts.js';
+import { chamberAbi, erc20Abi, managerSigRegistrarAbi, reserveAbi } from '../src/abis.generated.js';
 import { OWNER_KEYWORD } from '../src/identity.js';
 import { decapsulate, deriveUkx, managerKeys } from '../src/pq.js';
 import type { ProverAdapter } from '../src/proving.js';
 import type { ChainAdapter, Hex, MistCallbacks, StorageAdapter } from '../src/types.js';
+import { depositQueuedLog, noteAppendedLog, type Log } from './helpers/chamber-logs.js';
 
 const BOOK = {
   chamber: '0x1111111111111111111111111111111111111111' as Hex,
@@ -31,21 +34,24 @@ const OTHER_RESERVE = '0x7777777777777777777777777777777777777777' as Hex;
 const MIST_ADDR = '123';
 const ALICE_OWNER = BigInt(ALICE_ADDR).toString();
 
+// The registrar signature `managerSide` returns: who signed (a USERS holder
+// on the reserve) and the last second it is valid.
+const SIGNER = '0x9999999999999999999999999999999999999999' as Hex;
+const DEADLINE = 1_900_000_000n;
+
 // Decode ABIs matching what the client encodes. Every assertion below uses
 // distinct values per position, so any argument-order slip in client.ts shows
 // up as a mismatch here.
 const CHAMBER_MIN = [
   { type: 'function', name: 'handleZkp', stateMutability: 'nonpayable', inputs: [{ name: 'proof', type: 'uint256[8]' }, { name: 'input', type: 'uint256[14]' }, { name: 'auditorCommitments', type: 'uint256[]' }], outputs: [] },
-  { type: 'function', name: 'setVerifier', stateMutability: 'nonpayable', inputs: [{ name: 'verifier', type: 'address' }], outputs: [] },
 ] as const;
 
 const RESERVE_MIN = [
-  { type: 'function', name: 'setRegistrar', stateMutability: 'nonpayable', inputs: [{ name: 'registrar', type: 'address' }], outputs: [] },
   { type: 'function', name: 'updateAuditorKey', stateMutability: 'nonpayable', inputs: [{ name: 'keyHash', type: 'uint256' }, { name: 'keyInputPoint', type: 'uint256' }], outputs: [] },
 ] as const;
 
 const REGISTRAR_MIN = [
-  { type: 'function', name: 'registerUser', stateMutability: 'nonpayable', inputs: [{ name: 'reserve', type: 'address' }, { name: 'leaf', type: 'uint256' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'registerUser', stateMutability: 'nonpayable', inputs: [{ name: 'reserve', type: 'address' }, { name: 'leaf', type: 'uint256' }, { name: 'deadline', type: 'uint256' }, { name: 'signer', type: 'address' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
 ] as const;
 
 // What the client hands the prover. `serializeSpendRequest` emits bigints as
@@ -66,6 +72,18 @@ interface CapturedRequest {
   WithdrawTo: string;
 }
 
+// The README's adapter parses CORE_ABI for every read and event, so a name the
+// client uses outside it would only fail in a real host. The mock refuses it.
+const CORE = parseAbi(CORE_ABI) as unknown as Array<{ type: string; name?: string }>;
+const CORE_NAMES = (type: string) => new Set(CORE.filter((i) => i.type === type).map((i) => i.name));
+const CORE_FUNCTIONS = CORE_NAMES('function');
+const CORE_EVENTS = CORE_NAMES('event');
+
+const appendedLog = (index: bigint, note: bigint, address: Hex = BOOK.chamber): Log => noteAppendedLog(address, index, note);
+
+const queuedLog = (depositId: bigint, noteHash: bigint, reserve: Hex = BOOK.reserve): Log =>
+  depositQueuedLog(BOOK.chamber, { depositId, noteHash, reserve, depositor: ALICE_ADDR, asset: BOOK.token, amount: 100n });
+
 // Like `client.test.ts`'s mockChain, but records both writes (for ABI
 // decoding) and reads (for the spendState path) and lets each test shape the
 // chain state. `withGetEvents` distinguishes an adapter that omits the
@@ -73,32 +91,60 @@ interface CapturedRequest {
 // those differently.
 function mockChain(
   cfg: {
+    /** Chamber's txArray, every tx tree in order. */
     txLeaves?: bigint[];
+    /** txTreeCapacity; production is 4^10. */
+    capacity?: bigint;
     stateLeaves?: bigint[];
     reserveCfg?: unknown;
     users?: bigint;
     withGetEvents?: boolean;
-    events?: Array<{ args: Record<string, unknown> }>;
+    /** getEvents results by event name. */
+    events?: Record<string, Array<{ args: Record<string, unknown> }>>;
+    spendsPaused?: boolean;
+    /** isValidZkStateRoot for every root. */
+    validRoot?: boolean;
+    inflowsPaused?: boolean;
+    /** reserveAssetMinDeposit; 0 means the token is not listed. */
+    minDeposit?: bigint;
+    /** What sendTransaction resolves with, per transaction. */
+    respond?: (tx: { to: Hex; data: Hex }) => { logs?: Log[]; result?: unknown; status?: 'success' | 'reverted' };
   } = {},
 ) {
   const sent: Array<{ to: Hex; data: Hex }> = [];
   const reads: Array<{ address: Hex; fn: string; args: unknown[] }> = [];
   const chain: ChainAdapter = {
     readContract: async (address, fn, args) => {
+      if (!CORE_FUNCTIONS.has(fn)) throw new Error(`mockChain: ${fn} is not in CORE_ABI`);
       reads.push({ address, fn, args: args ?? [] });
-      if (fn === 'getTxArray') return cfg.txLeaves ?? [];
+      if (fn === 'getTxArray') {
+        const [offset, limit] = (args ?? []) as [bigint, bigint];
+        return (cfg.txLeaves ?? []).slice(Number(offset), Number(offset + limit));
+      }
+      if (fn === 'txTreeCapacity') return cfg.capacity ?? 4n ** 10n;
+      if (fn === 'txCount') return BigInt((cfg.txLeaves ?? []).length);
+      if (fn === 'noteIndexPlusOne') return BigInt((cfg.txLeaves ?? []).indexOf(args?.[0] as bigint) + 1);
       if (fn === 'zkStateLeaf') return cfg.stateLeaves?.[Number(args?.[0] ?? 0)] ?? 0n;
       if (fn === 'reserveConfigs') return cfg.reserveCfg ?? [0n, 7n, 0n];
       if (fn === 'registeredUsersCount') return cfg.users ?? 0n;
+      if (fn === 'inflowsPaused') return cfg.inflowsPaused ?? false;
+      if (fn === 'spendsPaused') return cfg.spendsPaused ?? false;
+      if (fn === 'isValidZkStateRoot') return cfg.validRoot ?? true;
+      if (fn === 'hasPermission') return (args?.[1] as Hex) === ALICE_ADDR && (args?.[0] as Hex) === RESERVE_ROLES.USERS;
+      if (fn === 'reserveAssetMinDeposit') return cfg.minDeposit ?? 1n;
       return 0n;
     },
     sendTransaction: async (tx) => {
       sent.push({ to: tx.to, data: tx.data });
-      return { receipt: { transactionHash: '0xabc' }, result: 42n };
+      const { logs, result, status } = cfg.respond?.(tx) ?? { logs: [appendedLog(5n, 4242n)] };
+      return { receipt: { transactionHash: '0xabc', logs, status }, result };
     },
   };
   if (cfg.withGetEvents) {
-    chain.getEvents = async () => cfg.events ?? [];
+    chain.getEvents = async (_address, eventName) => {
+      if (!CORE_EVENTS.has(eventName)) throw new Error(`mockChain: event ${eventName} is not in CORE_ABI`);
+      return cfg.events?.[eventName] ?? [];
+    };
   }
   return { chain, sent, reads };
 }
@@ -167,6 +213,140 @@ function fixedState(overrides: Partial<NonNullable<SpendOpts['state']>> = {}): N
 }
 
 describe('MistClient flows', () => {
+  // ── deposit ──────────────────────────────────────────────────────────────
+
+  it('deposit reads the note hash and its tx index from NoteAppended', async () => {
+    // Chamber.deposit returns (noteHash, depositId), which a mined receipt does
+    // not carry; NoteAppended does, with the leaf's global index, which picks
+    // the tx tree a later spend must prove against.
+    // A token log, and a Chamber log this ABI cannot decode, come first.
+    const unknown = { address: BOOK.chamber, topics: [`0x${'ee'.repeat(32)}` as Hex], data: '0x' as Hex };
+    const { chain, sent } = mockChain({
+      respond: () => ({ logs: [appendedLog(1n, 1n, BOOK.token), unknown, appendedLog(5n, 4242n)] }),
+    });
+    const client = makeClient({ chain });
+
+    const note = await client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' });
+
+    expect(note).toMatchObject({ hash: '4242', txIndex: 5, kind: 'deposit' });
+    expect(note.screening).toBeUndefined();
+    expect(sent.map((t) => t.to)).toEqual([BOOK.token, BOOK.chamber]);
+    // The Reserve, not the Chamber, pulls the tokens.
+    expect(decodeFunctionData({ abi: erc20Abi, data: sent[0].data })).toEqual({ functionName: 'approve', args: [BOOK.reserve, 100n] });
+    const call = decodeFunctionData({ abi: chamberAbi, data: sent[1].data });
+    expect(call.functionName).toBe('deposit');
+    // The commitment is H2(blinding, owner); the mock hash2 answers 123.
+    expect(call.args).toEqual([BOOK.reserve, 123n, 100n, BOOK.token]);
+  });
+
+  it('deposit picks its own note from a receipt that holds others', async () => {
+    // A bundled receipt (e.g. an ERC-4337 bundle) can carry other deposits'
+    // events: the call's result names this one, and DepositQueued names its reserve.
+    const appended = mockChain({ respond: () => ({ logs: [appendedLog(3n, 1111n), appendedLog(5n, 4242n)], result: [4242n, 0n] }) });
+    expect(await makeClient({ chain: appended.chain }).deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).toMatchObject({
+      hash: '4242', txIndex: 5,
+    });
+
+    const queued = mockChain({ respond: () => ({ logs: [queuedLog(9n, 1111n, OTHER_RESERVE), queuedLog(7n, 4242n)] }) });
+    expect(await makeClient({ chain: queued.chain }).deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).toMatchObject({
+      hash: '4242', screening: 'pending', depositId: '7',
+    });
+  });
+
+  it('deposit refuses to guess between several notes in one receipt', async () => {
+    const { chain } = mockChain({ respond: () => ({ logs: [appendedLog(3n, 1111n), appendedLog(5n, 4242n)] }) });
+    const client = makeClient({ chain });
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      /several Chamber notes/,
+    );
+    expect(client.notes).toEqual([]);
+  });
+
+  it('deposit names refundTo through the five-argument overload', async () => {
+    // refundTo receives (and may trigger) a reclaim of a screened deposit,
+    // so a router depositing for a user can name the user.
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+
+    await client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9', refundTo: BOB_ADDR });
+
+    const call = decodeFunctionData({ abi: chamberAbi, data: sent[1].data });
+    expect(call.args).toEqual([BOOK.reserve, 123n, 100n, BOOK.token, getAddress(BOB_ADDR)]);
+  });
+
+  it("deposit falls back to the call's (noteHash, depositId) result without logs", async () => {
+    const plain = makeClient({ chain: mockChain({ respond: () => ({ result: [4242n, 0n] }) }).chain });
+    const note = await plain.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' });
+    expect(note).toMatchObject({ hash: '4242' });
+    expect(note.screening).toBeUndefined();
+    expect(note.depositId).toBeUndefined();
+
+    const screened = makeClient({ chain: mockChain({ respond: () => ({ result: [4242n, 7n] }) }).chain });
+    expect(await screened.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).toMatchObject({
+      hash: '4242', screening: 'pending', depositId: '7',
+    });
+  });
+
+  it('deposit refuses to send the deposit when the adapter reports neither logs nor results', async () => {
+    // Without the hash the note cannot be located in a tx tree, so it could
+    // never be spent. The approve's receipt shows what the adapter reports,
+    // so stop there: no funds have moved yet.
+    const { chain, sent } = mockChain({ respond: () => ({}) });
+    const client = makeClient({ chain });
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      /return receipt\.logs.*nothing was deposited/,
+    );
+    expect(sent.map((t) => t.to)).toEqual([BOOK.token]);
+    expect(client.notes).toEqual([]);
+  });
+
+  it('deposit throws when a sent deposit names no note', async () => {
+    // The adapter passes logs, but the deposit's receipt has none of the
+    // Chamber's (e.g. a filtered log set): say so rather than keep a hashless note.
+    const { chain, sent } = mockChain({ respond: () => ({ logs: [] }) });
+    const client = makeClient({ chain });
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      /no NoteAppended or DepositQueued log/,
+    );
+    expect(sent).toHaveLength(2);
+    expect(client.notes).toEqual([]);
+  });
+
+  it('deposit refuses before approving while inflows are paused', async () => {
+    // The guardian's pause makes Chamber.deposit revert; checking first saves
+    // the approve and leaves no allowance behind.
+    const { chain, sent } = mockChain({ inflowsPaused: true });
+    const client = makeClient({ chain });
+
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'Deposits are paused.',
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it('deposit refuses a token the reserve has not listed', async () => {
+    const { chain, sent, reads } = mockChain({ minDeposit: 0n });
+    const client = makeClient({ chain });
+
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'This reserve does not accept this token.',
+    );
+    expect(sent).toEqual([]);
+    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'reserveAssetMinDeposit', args: [BOOK.reserve, BOOK.token] });
+  });
+
+  it("deposit refuses an amount below the reserve's minimum, and takes one at it", async () => {
+    const { chain, sent } = mockChain({ minDeposit: 100n });
+    const client = makeClient({ chain });
+
+    await expect(client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 99n, blinding: '9' })).rejects.toThrow(
+      'The minimum deposit at this reserve is 100.',
+    );
+    expect(sent).toEqual([]);
+    await client.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '8' });
+    expect(sent).toHaveLength(2);
+  });
+
   // ── join ─────────────────────────────────────────────────────────────────
 
   it('join derives a shared ukx, registers its leaf through the registrar, and records the exchange', async () => {
@@ -183,6 +363,8 @@ describe('MistClient flows', () => {
     const managerSide = vi.fn(
       (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) => ({
         ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+        signer: SIGNER,
+        deadline: DEADLINE,
         signature: '0xbeef' as Hex,
       }),
     );
@@ -201,8 +383,9 @@ describe('MistClient flows', () => {
     expect(sent[0].to).toBe(BOOK.registrar);
     const call = decodeFunctionData({ abi: REGISTRAR_MIN, data: sent[0].data });
     expect(call.functionName).toBe('registerUser');
-    // (reserve, leaf = H2(mistAddr, ukx), manager signature over that leaf).
-    expect(call.args).toEqual([BOOK.reserve, BigInt(LEAF), '0xbeef']);
+    // (reserve, leaf = H2(mistAddr, ukx), deadline, the USERS holder who
+    // signed, and its signature over registerUserDigest(reserve, leaf, deadline)).
+    expect(call.args).toEqual([BOOK.reserve, BigInt(LEAF), DEADLINE, SIGNER, '0xbeef']);
     // The ukx must never reach the chain: it derives every private tx key.
     expect(sent[0].data.toLowerCase()).not.toContain(BigInt(ukx).toString(16).padStart(64, '0'));
     expect(client.ukx[`${BOOK.reserve}:${MIST_ADDR}`]).toBe(ukx);
@@ -220,12 +403,44 @@ describe('MistClient flows', () => {
       managerPublicKey: manager.publicKey,
       managerSide: async (args) => ({
         ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+        signer: SIGNER,
+        deadline: DEADLINE,
         signature: '0xbeef' as Hex,
       }),
     });
 
     expect(sent).toHaveLength(1);
     expect(client.ukx[`${BOOK.reserve}:${MIST_ADDR}`]).toBe(ukx);
+  });
+
+  it('join records no membership when the registrar rejects the signature', async () => {
+    // An expired or revoked signature, or a signer without USERS, reverts
+    // registerUser. The client must not then believe it is a member: it
+    // would plan spends that the prover cannot build (no leaf on-chain).
+    const manager = managerKeys('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+    for (const reason of ['Registrar: signature expired', 'Registrar: signature revoked', 'Registrar: missing users permission']) {
+      const { chain } = mockChain();
+      chain.sendTransaction = async () => {
+        throw new Error(`execution reverted: ${reason}`);
+      };
+      const client = makeClient({ chain });
+
+      await expect(
+        client.join({
+          id: 'alice (MIST)',
+          reserve: BOOK.reserve,
+          managerPublicKey: manager.publicKey,
+          managerSide: (args) => ({
+            ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+            signer: SIGNER,
+            deadline: DEADLINE,
+            signature: '0xbeef' as Hex,
+          }),
+        }),
+      ).rejects.toThrow(reason);
+      expect(client.ukx).toEqual({});
+      expect(await client.isMember(BOOK.reserve, 'alice (MIST)')).toBe(false);
+    }
   });
 
   it('join refuses to register when the manager derives a different ukx', async () => {
@@ -241,7 +456,7 @@ describe('MistClient flows', () => {
         id: 'alice (MIST)',
         reserve: BOOK.reserve,
         managerPublicKey: manager.publicKey,
-        managerSide: () => ({ ukx: '1', signature: '0xbeef' as Hex }),
+        managerSide: () => ({ ukx: '1', signer: SIGNER, deadline: DEADLINE, signature: '0xbeef' as Hex }),
       }),
     ).rejects.toThrow('Client and manager derived different ukx values');
     expect(sent).toHaveLength(0);
@@ -437,11 +652,11 @@ describe('MistClient flows', () => {
       reserveCfg: [0n, 7n, 0n],
       users: 0n,
       withGetEvents: true,
-      events: [{ args: { leaf: 55n } }, { args: { leaf: 66n } }],
+      events: { UserRegistered: [{ args: { leaf: 55n, index: 0n } }, { args: { leaf: 66n, index: 1n } }] },
     });
     const { prover, requests } = mockProver();
     const client = makeClient({ chain, prover });
-    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '22' }];
 
     await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve });
 
@@ -452,7 +667,7 @@ describe('MistClient flows', () => {
     expect(req.ReserveConfig).toBe('7');
     expect(req.Reserve).toBe(BOOK.reserve);
     expect(reads.filter((r) => r.fn === 'zkStateLeaf').map((r) => r.args[0])).toEqual([0n, 1n, 2n]);
-    expect(reads.some((r) => r.fn === 'getTxArray' && r.address === BOOK.chamber)).toBe(true);
+    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'getTxArray', args: [0n, 2n] });
     expect(reads.some((r) => r.fn === 'reserveConfigs' && r.address === BOOK.chamber && r.args[0] === BOOK.reserve)).toBe(true);
     expect(reads.some((r) => r.fn === 'registeredUsersCount' && r.address === BOOK.reserve)).toBe(true);
   });
@@ -460,16 +675,291 @@ describe('MistClient flows', () => {
   it('tolerates a chain adapter without getEvents and a bare reserveConfigs value', async () => {
     // `getEvents` is optional on ChainAdapter and `reserveConfigs` shapes vary
     // across adapters; neither may crash a plain spend.
-    const { chain, reads } = mockChain({ reserveCfg: 55n });
+    const { chain, reads } = mockChain({ reserveCfg: 55n, txLeaves: [11n] });
     const { prover, requests } = mockProver();
     const client = makeClient({ chain, prover });
-    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '11' }];
 
     await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve });
 
     expect(requests[0].UserLeaves).toEqual([]);
     expect(requests[0].ReserveConfig).toBe('55');
     expect(reads.filter((r) => r.fn === 'zkStateLeaf').map((r) => r.args[0])).toEqual([0n]);
+  });
+
+  it("spend proves against the input note's own tx tree, located by its hash", async () => {
+    // Tx trees roll over every txTreeCapacity leaves and a spend proves
+    // against one tree's root, so TxLeaves must be that tree alone: trees of
+    // 4 here, and the note (index 5) sits in tree 1.
+    const txLeaves = Array.from({ length: 10 }, (_, i) => 100n + BigInt(i));
+    const { chain, reads } = mockChain({ txLeaves, capacity: 4n });
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    const note = { reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '105' };
+    client.notes = [note];
+
+    await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve });
+
+    expect(requests[0].TxLeaves).toEqual(['104', '105', '106', '107']);
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[4n, 4n]]);
+    expect(note).toMatchObject({ txIndex: 5, spent: true });
+  });
+
+  it('spend never pairs inputs from different tx trees', async () => {
+    // 50 (tree 0) + 55 (tree 1) is the tightest cover, but only 55 + 60
+    // (both tree 1) can be proven together.
+    const txLeaves = Array.from({ length: 8 }, (_, i) => 100n + BigInt(i));
+    const { chain } = mockChain({ txLeaves, capacity: 4n });
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    client.notes = [
+      { reserve: BOOK.reserve, id: 'alice', blinding: 'b50', amount: 50n, hash: '101' },
+      { reserve: BOOK.reserve, id: 'alice', blinding: 'b55', amount: 55n, txIndex: 5 },
+      { reserve: BOOK.reserve, id: 'alice', blinding: 'b60', amount: 60n, txIndex: 6 },
+    ];
+
+    await client.spend({ id: 'alice', amount: 100n, to: 'bob', reserve: BOOK.reserve });
+
+    expect(requests[0].In.map((x) => x.Blinding)).toEqual(['b55', 'b60']);
+    expect(requests[0].TxLeaves).toEqual(['104', '105', '106', '107']);
+  });
+
+  it('spend leaves out notes that are in no tx tree', async () => {
+    // A hash the Chamber never appended (noteIndexPlusOne = 0), or no hash at
+    // all, cannot be proven against any root.
+    const { chain, sent } = mockChain({ txLeaves: [11n] });
+    const client = makeClient({ chain });
+    client.notes = [
+      { reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '99' },
+      { reserve: BOOK.reserve, id: 'alice', blinding: '2', amount: 100n },
+    ];
+
+    await expect(client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve })).rejects.toThrow(
+      'Your notes here hold 0.',
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it('txTreeLeaves pages getTxArray up to txCount, in order', async () => {
+    // A full tree is 4^10 leaves: too many for one eth_call, so 1024 per page
+    // (about 2.3M gas of storage reads), never past the last leaf.
+    const txLeaves = Array.from({ length: 5000 }, (_, i) => BigInt(i + 1));
+    const { chain, reads } = mockChain({ txLeaves, capacity: 8192n });
+    const client = makeClient({ chain });
+
+    const leaves = await client.txTreeLeaves(0);
+
+    expect(leaves).toEqual(txLeaves.map(String));
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([
+      [0n, 1024n], [1024n, 1024n], [2048n, 1024n], [3072n, 1024n], [4096n, 904n],
+    ]);
+    expect(await client.txTreeLeaves(1)).toEqual([]);
+    expect(reads.filter((r) => r.fn === 'getTxArray')).toHaveLength(5);
+  });
+
+  it('txTreeLeaves never reads past its own tree', async () => {
+    const txLeaves = Array.from({ length: 10 }, (_, i) => BigInt(i + 1));
+    const { chain, reads } = mockChain({ txLeaves, capacity: 4n });
+    const client = makeClient({ chain });
+
+    expect(await client.txTreeLeaves(1)).toEqual(['5', '6', '7', '8']);
+    expect(await client.txTreeLeaves(2)).toEqual(['9', '10']);
+    expect(reads.filter((r) => r.fn === 'getTxArray').map((r) => r.args)).toEqual([[4n, 4n], [8n, 2n]]);
+    // Capacity is a Chamber constant: read once.
+    expect(reads.filter((r) => r.fn === 'txTreeCapacity')).toHaveLength(1);
+  });
+
+  it('a failed txTreeCapacity read is retried, not cached', async () => {
+    // One RPC blip must not break every later spend on this client.
+    const { chain } = mockChain({ txLeaves: [1n, 2n], capacity: 4n });
+    const read = chain.readContract;
+    let fail = true;
+    chain.readContract = async (address, fn, args) => {
+      if (fn === 'txTreeCapacity' && fail) {
+        fail = false;
+        throw new Error('RPC timeout');
+      }
+      return read(address, fn, args);
+    };
+    const client = makeClient({ chain });
+
+    await expect(client.txTreeLeaves(0)).rejects.toThrow('RPC timeout');
+    expect(await client.txTreeLeaves(0)).toEqual(['1', '2']);
+  });
+
+  it("records the tx index of a spend's new notes from NoteAppended", async () => {
+    // The prover's newNote1/newNote2 are publicInputs[2]/[3] ('12', '13').
+    const { chain } = mockChain({ respond: () => ({ logs: [appendedLog(10n, 12n), appendedLog(11n, 13n)] }) });
+    const client = makeClient({ chain });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, state: fixedState() });
+
+    expect(client.notes.filter((x) => !x.spent).map((x) => [x.kind, x.hash, x.txIndex])).toEqual([
+      ['received', '12', 10],
+      ['change', '13', 11],
+    ]);
+  });
+
+  it('spend refuses an amount with no recipient, before proving', async () => {
+    // Output 1 goes to `to`; without one its owner is 0, which no proof or
+    // caller can ever authorize, so the amount would be burned.
+    const { chain, sent } = mockChain();
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await expect(client.spend({ id: 'alice', amount: 40n, reserve: BOOK.reserve, state: fixedState() })).rejects.toThrow(
+      'to is required to send an amount: a note with no owner can never be spent',
+    );
+    await expect(
+      client.spend({ id: 'alice', amount: 40n, to: null, withdraw: 10n, withdrawTo: 'bob', reserve: BOOK.reserve, state: fixedState() }),
+    ).rejects.toThrow('to is required');
+    expect(requests).toEqual([]);
+    expect(sent).toEqual([]);
+
+    // A withdrawal's first output is a zero-value dummy owned by 0: still fine.
+    await client.spend({ id: 'alice', amount: 0n, withdraw: 40n, withdrawTo: 'bob', reserve: BOOK.reserve, state: fixedState() });
+    expect(requests[0].Out[0]).toMatchObject({ id: null, Owner: '0', Amount: 0 });
+  });
+
+  it('a reverted receipt fails the call and records nothing', async () => {
+    // An adapter may return a mined-but-reverted receipt instead of
+    // throwing; the client must not then believe the call happened.
+    const reverted = () => ({ status: 'reverted' as const });
+
+    const spender = makeClient({ chain: mockChain({ respond: reverted }).chain, prover: mockProver({ commitments: () => ['999'] }).prover });
+    spender.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    await expect(
+      spender.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, keyIndex: 4, state: fixedState({ ukx: '555' }) }),
+    ).rejects.toThrow('MistClient: handleZkp reverted (0xabc)');
+    expect(spender.notes).toEqual([{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }]);
+    expect(spender.usedKeyIndices.get('555')?.has(4) ?? false).toBe(false);
+
+    const manager = managerKeys('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+    const joiner = makeClient({ chain: mockChain({ respond: reverted }).chain });
+    await expect(
+      joiner.join({
+        id: 'alice (MIST)',
+        reserve: BOOK.reserve,
+        managerPublicKey: manager.publicKey,
+        managerSide: (args) => ({
+          ukx: deriveUkx(decapsulate(args.cipherText, manager.secretKey), args.reserve, args.mistAddr),
+          signer: SIGNER,
+          deadline: DEADLINE,
+          signature: '0xbeef' as Hex,
+        }),
+      }),
+    ).rejects.toThrow('MistClient: registerUser reverted');
+    expect(joiner.ukx).toEqual({});
+
+    const onTx = vi.fn();
+    const depositor = makeClient({ chain: mockChain({ respond: reverted }).chain, callbacks: { onTx } });
+    await expect(depositor.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'MistClient: approve reverted',
+    );
+    expect(depositor.notes).toEqual([]);
+    // onTx reports confirmed writes only, as when the adapter throws.
+    expect(onTx).not.toHaveBeenCalled();
+  });
+
+  it('spend refuses while spends are paused, before proving', async () => {
+    // The guardian can pause handleZkp for up to 3 days; a proof made now
+    // would only revert.
+    const { chain, sent } = mockChain({ spendsPaused: true });
+    const { prover, requests } = mockProver();
+    const client = makeClient({ chain, prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await expect(
+      client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, state: fixedState() }),
+    ).rejects.toThrow('Spends are paused.');
+    expect(requests).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  it('spend refuses to submit a proof whose zkState root the Chamber no longer accepts', async () => {
+    // A superseded root stays valid for 10 minutes; past that, or for a root
+    // the Chamber never had, handleZkp reverts with "invalid state root".
+    const { chain, sent, reads } = mockChain({ validRoot: false });
+    const { prover, requests } = mockProver({ commitments: () => ['999'] });
+    const client = makeClient({ chain, prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+
+    await expect(
+      client.spend({ id: 'alice', amount: 40n, to: 'bob', reserve: BOOK.reserve, keyIndex: 4, state: fixedState({ ukx: '555' }) }),
+    ).rejects.toThrow('The reserve state changed while proving: spend again.');
+    expect(requests).toHaveLength(1);
+    expect(sent).toEqual([]);
+    // stateRoot is publicInputs[5] ('15' from the mock prover).
+    expect(reads).toContainEqual({ address: BOOK.chamber, fn: 'isValidZkStateRoot', args: [15n] });
+    // Nothing reached the chain, so the key index stays free and no note moved.
+    expect(client.usedKeyIndices.get('555')?.has(4) ?? false).toBe(false);
+    expect(client.notes.filter((x) => x.spent)).toEqual([]);
+  });
+
+  it('UserLeaves zero a removed user in place', async () => {
+    // Reserve.removeUser zeroes the leaf at its index; the prover rebuilds
+    // the users root from these leaves, so dropping or keeping the removed
+    // leaf would both give a root the Chamber never had.
+    const { chain } = mockChain({
+      withGetEvents: true,
+      txLeaves: [11n],
+      events: {
+        UserRegistered: [{ args: { leaf: 77n, index: 2n } }, { args: { leaf: 55n, index: 0n } }, { args: { leaf: 66n, index: 1n } }],
+        UserRemoved: [{ args: { index: 1n, leaf: 66n } }],
+      },
+    });
+    const client = makeClient({ chain });
+
+    expect(await client.registeredUserLeaves(BOOK.reserve)).toEqual(['55', '0', '77']);
+    expect(await makeClient().registeredUserLeaves(BOOK.reserve)).toEqual([]);
+  });
+
+  it('registeredUserLeaves refuses a users tree with a missing registration', async () => {
+    // A hole (an adapter capped by block range, a lagging node) would be read
+    // as a zeroed user and give a users root the Chamber never had.
+    const { chain } = mockChain({
+      withGetEvents: true,
+      events: { UserRegistered: [{ args: { leaf: 55n, index: 0n } }, { args: { leaf: 77n, index: 2n } }] },
+    });
+    await expect(makeClient({ chain }).registeredUserLeaves(BOOK.reserve)).rejects.toThrow(
+      `MistClient: UserRegistered events are missing for reserve ${BOOK.reserve}`,
+    );
+  });
+
+  it("spend refuses before proving when it cannot read all of a reserve's users", async () => {
+    // registeredUsersCount counts every slot, removed ones included; fewer
+    // leaves than that (no getEvents, or missing trailing events) cannot prove.
+    for (const cfg of [{}, { withGetEvents: true, events: { UserRegistered: [{ args: { leaf: 55n, index: 0n } }] } }]) {
+      const { chain, sent } = mockChain({ ...cfg, users: 2n, txLeaves: [11n] });
+      const { prover, requests } = mockProver();
+      const client = makeClient({ chain, prover });
+      client.ukx[`${BOOK.reserve}:${ALICE_OWNER}`] = '555';
+      client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n, hash: '11' }];
+
+      await expect(client.spend({ id: 'alice', amount: 10n, to: 'bob', reserve: BOOK.reserve })).rejects.toThrow(
+        /MistClient: read [01] of the reserve's 2 user leaves/,
+      );
+      expect(requests).toEqual([]);
+      expect(sent).toEqual([]);
+    }
+  });
+
+  it('spend refuses a member whose leaf the reserve no longer lists', async () => {
+    // After removeUser the prover finds no leaf for H2(owner, ukx); say why
+    // instead of failing inside the witness builder.
+    const { prover, requests } = mockProver();
+    const client = makeClient({ prover });
+    client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
+    const spend = (userLeaves: string[]) =>
+      client.spend({ id: 'alice', amount: 10n, to: 'bob', reserve: BOOK.reserve, state: fixedState({ ukx: '555', userLeaves }) });
+
+    // The mock hash2 makes every leaf H2(owner, ukx) = '123'.
+    await expect(spend(['55', '0'])).rejects.toThrow('This reserve no longer lists you as a member: join it again.');
+    expect(requests).toEqual([]);
+    await spend(['55', '123']);
+    expect(requests).toHaveLength(1);
   });
 
   it('spendState falls back to owner 0 when identity resolution throws', async () => {
@@ -563,7 +1053,7 @@ describe('MistClient flows', () => {
       { reserve: OTHER_RESERVE, id: 'alice', blinding: '2', amount: 100n },
     ];
 
-    await client.spend({ id: 'alice', amount: 10n, state: fixedState() });
+    await client.spend({ id: 'alice', amount: 10n, to: 'bob', state: fixedState() });
 
     expect(requests[0].Reserve).toBe(OTHER_RESERVE);
   });
@@ -577,7 +1067,7 @@ describe('MistClient flows', () => {
     client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
 
     await expect(
-      client.spend({ id: 'alice', amount: 500n, reserve: BOOK.reserve, state: fixedState() }),
+      client.spend({ id: 'alice', amount: 500n, to: 'bob', reserve: BOOK.reserve, state: fixedState() }),
     ).rejects.toThrow('Your notes here hold 100.');
   });
 
@@ -588,7 +1078,7 @@ describe('MistClient flows', () => {
     const client = makeClient({ chain });
     client.notes = [{ reserve: BOOK.reserve, id: 'alice', blinding: '1', amount: 100n }];
 
-    await expect(client.spend({ id: 'alice', amount: 10n, reserve: BOOK.reserve })).rejects.toThrow(
+    await expect(client.spend({ id: 'alice', amount: 10n, to: 'bob', reserve: BOOK.reserve })).rejects.toThrow(
       'Reserve is members only: join it first.',
     );
   });
@@ -621,40 +1111,77 @@ describe('MistClient flows', () => {
 
   // ── admin wrappers ───────────────────────────────────────────────────────
 
-  it('setVerifier pins its verifier argument', async () => {
+  it('reserve admin calls go to the reserve with the role hash and account in order', async () => {
+    // Every permissioned action is taken on the Reserve, which pushes the
+    // result to the Chamber.
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+    const NEXT = '0x8888888888888888888888888888888888888888' as Hex;
+
+    await client.grantPermission(BOOK.reserve, 'SCREENING', SIGNER);
+    await client.revokePermission(BOOK.reserve, 'ASSETS', NEXT);
+    await client.transferAdmin(BOOK.reserve, NEXT);
+    await client.acceptAdmin(BOOK.reserve);
+    await client.setAssetMinDeposit(BOOK.reserve, BOOK.token, 25n);
+    await client.removeUser(BOOK.reserve, 3n);
+
+    expect(sent.map((t) => t.to)).toEqual(Array(6).fill(BOOK.reserve));
+    expect(sent.map((t) => decodeFunctionData({ abi: reserveAbi, data: t.data }))).toEqual([
+      { functionName: 'grantPermission', args: [RESERVE_ROLES.SCREENING, SIGNER] },
+      { functionName: 'revokePermission', args: [RESERVE_ROLES.ASSETS, NEXT] },
+      { functionName: 'transferAdmin', args: [NEXT] },
+      { functionName: 'acceptAdmin', args: undefined },
+      { functionName: 'setAssetMinDeposit', args: [BOOK.token, 25n] },
+      { functionName: 'removeUser', args: [3n] },
+    ]);
+  });
+
+  it('hasPermission asks the reserve for one role and account', async () => {
+    const { chain, reads } = mockChain();
+    const client = makeClient({ chain });
+
+    expect(await client.hasPermission(BOOK.reserve, 'USERS', ALICE_ADDR)).toBe(true);
+    expect(await client.hasPermission(BOOK.reserve, 'METADATA', ALICE_ADDR)).toBe(false);
+    expect(await client.hasPermission(BOOK.reserve, 'USERS', BOB_ADDR)).toBe(false);
+    expect(reads[0]).toEqual({ address: BOOK.reserve, fn: 'hasPermission', args: [RESERVE_ROLES.USERS, ALICE_ADDR] });
+  });
+
+  it("revokeRegistration revokes every outstanding signature for a leaf at the registrar", async () => {
+    // Registrar v3 counts revocations per (reserve, leaf) and signs over the
+    // count, so one call kills every signer's signature for that leaf.
     const { chain, sent } = mockChain();
     const client = makeClient({ chain });
 
-    const receipt = await client.setVerifier(BOOK.verifier);
+    await client.revokeRegistration(BOOK.reserve, 777n);
 
-    expect(receipt.transactionHash).toBe('0xabc');
+    expect(sent[0].to).toBe(BOOK.registrar);
+    expect(decodeFunctionData({ abi: managerSigRegistrarAbi, data: sent[0].data })).toEqual({
+      functionName: 'revoke', args: [BOOK.reserve, 777n],
+    });
+  });
+
+  it("setDepositRefundTo names a pending deposit's new refundTo at the Chamber", async () => {
+    const { chain, sent } = mockChain();
+    const client = makeClient({ chain });
+
+    await client.setDepositRefundTo(7n, SIGNER);
+
     expect(sent[0].to).toBe(BOOK.chamber);
-    const call = decodeFunctionData({ abi: CHAMBER_MIN, data: sent[0].data });
-    expect(call.functionName).toBe('setVerifier');
-    expect(call.args).toEqual([BOOK.verifier]);
+    expect(decodeFunctionData({ abi: chamberAbi, data: sent[0].data })).toEqual({
+      functionName: 'setDepositRefundTo', args: [7n, SIGNER],
+    });
   });
 
-  it('setRegistrar points the reserve at book.registrar by default', async () => {
+  it('registerReserve names the admin first', async () => {
     const { chain, sent } = mockChain();
     const client = makeClient({ chain });
 
-    await client.setRegistrar(BOOK.reserve);
+    await client.registerReserve(SIGNER, 789n, 987n);
 
-    expect(sent[0].to).toBe(BOOK.reserve);
-    const call = decodeFunctionData({ abi: RESERVE_MIN, data: sent[0].data });
-    expect(call.functionName).toBe('setRegistrar');
-    expect(call.args).toEqual([BOOK.registrar]);
-  });
-
-  it('setRegistrar takes another registrar, or zero to close registration', async () => {
-    const { chain, sent } = mockChain();
-    const client = makeClient({ chain });
-    const zero = '0x0000000000000000000000000000000000000000' as Hex;
-
-    await client.setRegistrar(BOOK.reserve, zero);
-
-    const call = decodeFunctionData({ abi: RESERVE_MIN, data: sent[0].data });
-    expect(call.args).toEqual([zero]);
+    expect(sent[0].to).toBe(BOOK.chamber);
+    expect(decodeFunctionData({ abi: chamberAbi, data: sent[0].data })).toEqual({
+      functionName: 'registerReserve', args: [SIGNER, 789n, 987n],
+    });
   });
 
   it('updateAuditorKey pins keyHash before keyInputPoint', async () => {

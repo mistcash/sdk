@@ -4,14 +4,17 @@
 // (`MistCallbacks`) are all injected — set `sendTransaction` to route MIST
 // spends through a relayer while public spends go direct.
 
-import { decodeEventLog, encodeFunctionData } from 'viem';
+import { decodeEventLog, encodeFunctionData, isAddressEqual } from 'viem';
 import { account, isMist, ownerOf, rand } from './identity.js';
 import { plan, total, unspent } from './notes.js';
 import { buildSpendRequest, pickUnusedKeyIndex, proveSpend, randomKeyIndex, type ProverAdapter, type SpendRequest } from './proving.js';
 import { deriveUkx, encapsulate } from './pq.js';
-import type { AddressBook } from './contracts.js';
+import { RESERVE_ROLES, type AddressBook, type ReserveRole } from './contracts.js';
 import { chamberAbi, erc20Abi, managerSigRegistrarAbi, reserveAbi } from './abis.generated.js';
 import type { ChainAdapter, DepositStatus, Hex, MistCallbacks, Note, PendingDeposit, StorageAdapter, TxReceipt } from './types.js';
+
+/** Where a deposit's note went: its hash, and its tx index or screening deposit id. */
+type Placement = Pick<Note, 'hash' | 'txIndex' | 'screening' | 'depositId'>;
 
 /** Single store key holding the per-ukx used key-index map. */
 const KEY_INDICES_KEY = 'mist:keyIndices';
@@ -64,13 +67,28 @@ export interface DepositOpts {
   id: string;
   amount: bigint;
   blinding: string;
+  /**
+   * Who a rejected screened deposit refunds (and who may then reclaim it);
+   * defaults to the sender. A router depositing for a user names the user.
+   */
+  refundTo?: Hex;
+}
+
+/** What the reserve's half of `join` returns: the ukx it derived, and a registrar signature over the leaf. */
+export interface ManagerApproval {
+  ukx: string;
+  /** The reserve's USERS holder that signed, as named in the digest; the registrar checks its permission. */
+  signer: Hex;
+  /** Last valid timestamp (seconds, inclusive) the signature was made for. */
+  deadline: bigint;
+  signature: Hex;
 }
 
 export interface SpendOpts {
   /** Spending identity. */
   id: string;
   amount: bigint;
-  /** Recipient identity for sends; null for withdrawals. */
+  /** Recipient identity, required when `amount` > 0; null for withdrawals (`amount` 0). */
   to?: string | null;
   withdraw?: bigint;
   withdrawTo?: string;
@@ -85,6 +103,7 @@ export interface SpendOpts {
   keyIndex?: number;
   /** Fetched chain state; when omitted the client reads it via the adapter. */
   state?: {
+    /** Leaves of the one tx tree holding the input notes (`txTreeLeaves`). */
     txLeaves: string[];
     stateLeaves: string[];
     userLeaves: string[];
@@ -131,8 +150,15 @@ export class MistClient {
     const veto = await this.callbacks.onBeforeSend?.({ to, data, functionName });
     if (veto === false) throw new Error(`MistClient: send of ${functionName} vetoed by onBeforeSend`);
     const sent = await this.chain.sendTransaction({ to, data });
+    // A mined revert must fail like a thrown one, before any local state moves.
+    if (sent.receipt.status === 'reverted') throw new Error(`MistClient: ${functionName} reverted (${sent.receipt.transactionHash})`);
     this.callbacks.onTx?.({ functionName, receipt: sent.receipt });
     return { receipt: sent.receipt, result: sent.result };
+  }
+
+  /** `write` for calls whose receipt is all the caller needs. */
+  private async send(to: Hex, data: Hex, functionName: string): Promise<TxReceipt> {
+    return (await this.write(to, data, functionName)).receipt;
   }
 
   private async ownerFor(id: string): Promise<string> {
@@ -146,34 +172,78 @@ export class MistClient {
    * Approve + deposit into a reserve vault. Returns the new local note. At a
    * screened reserve the note comes back `screening: 'pending'` with its
    * `depositId`, and is spendable only after `refreshScreening` sees it
-   * approved.
+   * approved. Refuses before approving while inflows are paused, or when the
+   * reserve does not list `book.token` or `amount` is below its minimum.
    */
   async deposit(opts: DepositOpts): Promise<Note> {
-    const { reserve, id, amount, blinding } = opts;
+    const { reserve, id, amount, blinding, refundTo } = opts;
     if (amount <= 0n) throw new Error('Enter a whole amount above zero.');
     const owner = await this.ownerFor(id);
-    const commitment = await this.prover.hash2(blinding, owner);
-    const screened = await this.isScreened(reserve);
+    const commitment = BigInt(await this.prover.hash2(blinding, owner));
+    await this.assertDepositable(reserve, amount);
     this.progress('Approving');
-    await this.write(
+    const approved = await this.write(
       this.book.token,
       encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [reserve, amount] }),
       'approve',
     );
+    // The deposit's note is read from its logs or result: stop while no funds have moved.
+    if (!approved.receipt.logs && approved.result === undefined) {
+      throw new Error('MistClient: deposit() needs sendTransaction to return receipt.logs (or the call result); nothing was deposited');
+    }
     this.progress('Depositing');
+    const args = [reserve, commitment, amount, this.book.token] as const;
     const { receipt, result } = await this.write(
       this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args: [reserve, BigInt(commitment), amount, this.book.token] }),
+      encodeFunctionData({ abi: chamberAbi, functionName: 'deposit', args: refundTo ? [...args, refundTo] : args }),
       'deposit',
     );
-    const note: Note = { reserve, id, blinding, amount, hash: String(result ?? ''), kind: 'deposit' };
-    if (screened) {
-      const queued = this.queuedFrom(receipt);
-      if (!queued) throw new Error('MistClient: screened deposit sent, but its receipt has no DepositQueued log');
-      Object.assign(note, { hash: queued.noteHash, screening: 'pending', depositId: queued.depositId });
+    const placed = this.depositOutcome(reserve, receipt, result);
+    if (!placed) {
+      throw new Error(
+        'MistClient: deposit sent, but its receipt has no NoteAppended or DepositQueued log and no (noteHash, depositId) result: return receipt.logs from sendTransaction',
+      );
     }
+    const note: Note = { reserve, id, blinding, amount, kind: 'deposit', ...placed };
     this.notes.push(note);
     return note;
+  }
+
+  /** Chamber.deposit's own checks, made before the approve is sent. */
+  private async assertDepositable(reserve: Hex, amount: bigint): Promise<void> {
+    const [paused, min] = await Promise.all([
+      this.chain.readContract(this.book.chamber, 'inflowsPaused'),
+      this.chain.readContract(this.book.chamber, 'reserveAssetMinDeposit', [reserve, this.book.token]),
+    ]);
+    if (paused) throw new Error('Deposits are paused.');
+    const minDeposit = BigInt(min as bigint);
+    if (minDeposit === 0n) throw new Error('This reserve does not accept this token.');
+    if (amount < minDeposit) throw new Error(`The minimum deposit at this reserve is ${minDeposit}.`);
+  }
+
+  /**
+   * Where a deposit's note went: into the tx tree (`NoteAppended`), or the
+   * screening queue (`DepositQueued` at `reserve`). The call's
+   * `(noteHash, depositId)` result, when the adapter returns it, picks this
+   * deposit's event from a receipt that holds others, and stands in for
+   * missing logs.
+   */
+  private depositOutcome(reserve: Hex, receipt: TxReceipt, result: unknown): Placement | undefined {
+    const [hash, depositId] = Array.isArray(result) && result.length === 2 ? result.map(String) : [];
+    const found: Placement[] = [];
+    for (const { eventName, args } of this.chamberEvents(receipt)) {
+      if (eventName === 'DepositQueued' && isAddressEqual(args.reserve, reserve)) {
+        found.push({ hash: String(args.noteHash), screening: 'pending', depositId: String(args.depositId) });
+      }
+      if (eventName === 'NoteAppended') found.push({ hash: String(args.note), txIndex: Number(args.index) });
+    }
+    const mine = hash ? found.filter((o) => o.hash === hash) : found;
+    if (mine.length > 1) {
+      throw new Error("MistClient: the deposit's receipt holds several Chamber notes: return the call's (noteHash, depositId) result to pick this one");
+    }
+    if (mine.length) return mine[0];
+    if (!hash) return undefined;
+    return depositId === '0' ? { hash } : { hash, screening: 'pending', depositId };
   }
 
   // ── Deposit screening ────────────────────────────────────────────────────
@@ -208,24 +278,29 @@ export class MistClient {
   }
 
   /**
-   * Re-read every local screened note: approved ones (their note is in the
+   * Re-read every local screened note: approved ones (their note is in a
    * tx tree) become spendable, rejected ones are marked so, and pending ones
-   * that left the queue without entering the tree were reclaimed.
+   * that left the queue without entering a tree were reclaimed.
    */
   async refreshScreening(notes: Note[] = this.notes): Promise<Note[]> {
     const open = notes.filter((x) => x.depositId && (x.screening === 'pending' || x.screening === 'rejected'));
-    if (!open.length) return [];
-    const inTree = new Set(((await this.chain.readContract(this.book.chamber, 'getTxArray')) as bigint[]).map(String));
-    for (const note of open) {
-      const { status } = await this.pendingDeposit(note.depositId!);
-      if (status !== 'none') note.screening = status;
-      else if (inTree.has(String(note.hash))) delete note.screening;
-      else note.screening = 'reclaimed';
-    }
+    await Promise.all(
+      open.map(async (note) => {
+        const { status } = await this.pendingDeposit(note.depositId!);
+        if (status !== 'none') note.screening = status;
+        // Rejection is final: a rejected deposit leaves the queue only by reclaim.
+        else if (note.screening !== 'rejected' && (await this.locate(note))) delete note.screening;
+        else note.screening = 'reclaimed';
+      }),
+    );
     return open;
   }
 
-  /** Take back a pending or rejected deposit (depositor only). */
+  /**
+   * Take back a queued deposit. A pending one returns to its depositor, who
+   * alone may call; a rejected one pays its `refundTo`, and the depositor or
+   * the `refundTo` may call.
+   */
   async reclaimDeposit(depositId: string | bigint): Promise<TxReceipt> {
     const { receipt } = await this.write(
       this.book.chamber,
@@ -236,14 +311,18 @@ export class MistClient {
     return receipt;
   }
 
-  /** Name (or clear, with the zero address) a reserve's screener. Manager only. */
+  /** Change a pending deposit's `refundTo`, who is paid if it is rejected. Depositor only. */
+  async setDepositRefundTo(depositId: string | bigint, refundTo: Hex): Promise<TxReceipt> {
+    return this.send(this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName: 'setDepositRefundTo', args: [BigInt(depositId), refundTo] }), 'setDepositRefundTo');
+  }
+
+  /**
+   * Name (or clear, with the zero address) a reserve's screener
+   * (`Reserve.setScreener`, which pushes it to the Chamber). Needs the
+   * reserve's SCREENING permission.
+   */
   async setReserveScreener(reserve: Hex, screener: Hex): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName: 'setReserveScreener', args: [reserve, screener] }),
-      'setReserveScreener',
-    );
-    return receipt;
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'setScreener', args: [screener] }), 'setScreener');
   }
 
   /**
@@ -263,14 +342,16 @@ export class MistClient {
 
   /**
    * Screener: approve queued deposits into the tx tree. `evidence` is a
-   * bytes32 commitment to the off-chain screening record. The batch
-   * reverts whole on any id that is no longer pending.
+   * bytes32 commitment to the off-chain screening record. Ids no longer
+   * pending are skipped, and a note already in a tx tree is rejected
+   * (`DepositDuplicateRejected`), so a mined batch does not mean every id
+   * was approved: `refreshScreening` reads the outcome.
    */
   async approveDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
     return this.decide('approveDeposits', depositIds, evidence);
   }
 
-  /** Screener: reject queued deposits (final; depositors can reclaim). */
+  /** Screener: reject queued deposits (final; they can still be reclaimed). Ids no longer pending are skipped. */
   async rejectDeposits(depositIds: Array<string | bigint>, evidence: Hex): Promise<TxReceipt> {
     return this.decide('rejectDeposits', depositIds, evidence);
   }
@@ -280,26 +361,21 @@ export class MistClient {
     depositIds: Array<string | bigint>,
     evidence: Hex,
   ): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName, args: [depositIds.map(BigInt), evidence] }),
-      functionName,
-    );
-    return receipt;
+    return this.send(this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName, args: [depositIds.map(BigInt), evidence] }), functionName);
   }
 
-  /** The `DepositQueued` the Chamber emitted in `receipt`, if any. */
-  private queuedFrom(receipt: TxReceipt): { depositId: string; noteHash: string } | undefined {
+  /** The Chamber events in `receipt`, in log order. */
+  private chamberEvents(receipt: TxReceipt) {
+    const events = [];
     for (const log of receipt.logs ?? []) {
-      if (log.address.toLowerCase() !== this.book.chamber.toLowerCase()) continue;
+      if (!isAddressEqual(log.address, this.book.chamber)) continue;
       try {
-        const { eventName, args } = decodeEventLog({ abi: chamberAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
-        if (eventName === 'DepositQueued') return { depositId: String(args.depositId), noteHash: String(args.noteHash) };
+        events.push(decodeEventLog({ abi: chamberAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] }));
       } catch {
         // Not a Chamber event this ABI knows.
       }
     }
-    return undefined;
+    return events;
   }
 
   // ── Spend (send / withdraw) ──────────────────────────────────────────────
@@ -310,12 +386,34 @@ export class MistClient {
     const reserve = opts.reserve ?? this.defaultReserve();
     const amount = opts.amount + (opts.withdraw ?? 0n);
     if ((opts.withdraw ?? 0n) > 0n && !opts.withdrawTo) throw new Error('withdrawTo is required for withdrawals');
-    const st = opts.state ?? (await this.spendState(reserve, opts.id));
-    const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember: await this.isMember(reserve, opts.id), notes });
+    if (opts.amount > 0n && !opts.to) throw new Error('to is required to send an amount: a note with no owner can never be spent');
+    if (await this.chain.readContract(this.book.chamber, 'spendsPaused')) throw new Error('Spends are paused.');
+    // Fetched state proves against the selected notes' own tx tree, so it
+    // needs each note's index; injected state brings its own leaves.
+    const fetched = !opts.state;
+    const [txTreeCapacity, st] = await Promise.all([
+      fetched ? this.txTreeCapacity() : undefined,
+      opts.state ?? this.spendState(reserve, opts.id),
+      fetched && Promise.all(unspent(notes, reserve, opts.id).map((n) => this.locate(n))),
+    ]);
+    const isMember = await this.isMember(reserve, opts.id);
+    const p = plan({ id: opts.id, amount, reserve, reserveUsers: st.reserveUsers, isMember, notes, txTreeCapacity });
     if ('error' in p) throw new Error(p.error);
+    // registeredUsersCount counts every slot, removed users included.
+    if (st.reserveUsers > 0n && BigInt(st.userLeaves.length) !== st.reserveUsers) {
+      throw new Error(
+        `MistClient: read ${st.userLeaves.length} of the reserve's ${st.reserveUsers} user leaves: ChainAdapter.getEvents must serve every UserRegistered and UserRemoved`,
+      );
+    }
+    const txLeaves = opts.state?.txLeaves ?? (await this.txTreeLeaves(p.txTree!));
 
     const owner = await this.ownerFor(opts.id);
     const ukx = st.ukx ?? this.ukx[`${reserve}:${owner}`] ?? '0';
+    // At a reserve with members the prover needs this member's leaf, which
+    // Reserve.removeUser zeroes.
+    if (ukx !== '0' && st.userLeaves.length && !st.userLeaves.includes(String(await this.prover.hash2(owner, ukx)))) {
+      throw new Error('This reserve no longer lists you as a member: join it again.');
+    }
     // Re-read the store before drawing: another live client sharing it may have
     // used an index since our last restore. A failed read falls back to memory.
     if (opts.keyIndex === undefined && ukx !== '0') await this.restoreKeyIndices().catch(() => {});
@@ -338,13 +436,17 @@ export class MistClient {
       outputs: out,
       withdraw: opts.withdraw ?? 0n,
       withdrawTo: opts.withdraw && opts.withdrawTo ? this.addressOf(opts.withdrawTo) : '0',
-      txLeaves: st.txLeaves,
+      txLeaves,
       stateLeaves: st.stateLeaves,
       userLeaves: st.userLeaves,
     });
     this.progress('Proving in your browser');
     const { res, secs } = await proveSpend(this.prover, req);
     this.callbacks.onProof?.({ kind: 'spend', secs });
+    // A superseded zkState root is accepted for ZK_STATE_ROOT_GRACE only.
+    if (!(await this.chain.readContract(this.book.chamber, 'isValidZkStateRoot', [BigInt(res.publicInputs[5])]))) {
+      throw new Error('The reserve state changed while proving: spend again.');
+    }
     this.progress(p.submitter === 'relayer' ? 'Relayer submitting' : 'Submitting');
     const { receipt } = await this.write(
       this.book.chamber,
@@ -370,9 +472,14 @@ export class MistClient {
 // would over-record, not under-record.
 if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedIndex(ukx, keyIndex);
     p.notes.forEach((nn, i) => Object.assign(nn, { spent: true, nullifier: res.publicInputs[i] }));
+    const appended = new Map<string, number>();
+    for (const { eventName, args } of this.chamberEvents(receipt)) {
+      if (eventName === 'NoteAppended') appended.set(String(args.note), Number(args.index));
+    }
     out.forEach((o, i) => {
       if (o.Amount > 0n && o.id) {
-        this.notes.push({ reserve, id: o.id, blinding: o.Blinding, amount: o.Amount, hash: res.publicInputs[2 + i], kind: i ? 'change' : 'received' });
+        const hash = res.publicInputs[2 + i];
+        this.notes.push({ reserve, id: o.id, blinding: o.Blinding, amount: o.Amount, hash, txIndex: appended.get(hash), kind: i ? 'change' : 'received' });
       }
     });
     return { receipt, secs, commitments: res.commitments ?? [] };
@@ -383,36 +490,42 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   /**
    * Join a reserve through an X-Wing key exchange, then register the
    * membership leaf `H2(mistAddr, ukx)` through `book.registrar`
-   * (`ManagerSigRegistrar.registerUser(reserve, leaf, signature)`, which calls
-   * `Reserve.addUser`).
+   * (`ManagerSigRegistrar.registerUser(reserve, leaf, deadline, signer,
+   * signature)`, which calls `Reserve.addUser`).
    *
-   * `managerSide` runs the manager's half wherever the host provides it (this
+   * `managerSide` runs the reserve's half wherever the host provides it (this
    * tab plays both sides in the playground): decapsulate `cipherText`, derive
-   * the same ukx, compute `leaf = H2(mistAddr, ukx)`, and sign the EIP-712
-   * digest `registrar.registerUserDigest(reserve, leaf)` with the reserve
-   * manager's key (65-byte `r ++ s ++ v`). The ukx never goes on-chain: only
-   * the leaf does.
+   * the same ukx, compute `leaf = H2(mistAddr, ukx)`, and have a holder of the
+   * reserve's USERS permission sign the EIP-712 digest
+   * `registrar.registerUserDigest(reserve, leaf, signer, deadline)` (65-byte
+   * `r ++ s ++ v`, or an ERC-1271 signature from a contract wallet). The
+   * digest binds the leaf's nonce, its revocation count and the signer's
+   * USERS epoch, so read it just before signing. The ukx never goes
+   * on-chain: only the leaf does.
    */
   async join(opts: {
     id: string;
     reserve: Hex;
     managerPublicKey: Uint8Array;
-    /** The manager's half; usually a request to the reserve manager's service. */
-    managerSide: (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) =>
-      { ukx: string; signature: Hex } | Promise<{ ukx: string; signature: Hex }>;
+    /** The reserve's half; usually a request to the reserve's service. */
+    managerSide: (args: { cipherText: Uint8Array; reserve: Hex; mistAddr: string }) => ManagerApproval | Promise<ManagerApproval>;
   }): Promise<{ ukx: string }> {
     const { id, reserve } = opts;
     this.progress('Exchanging keys');
     const { cipherText, sharedSecret } = encapsulate(opts.managerPublicKey);
     const mistAddr = await this.ownerFor(id);
     const ukx = deriveUkx(sharedSecret, reserve, mistAddr);
-    const { ukx: managerUkx, signature } = await opts.managerSide({ cipherText, reserve, mistAddr });
+    const { ukx: managerUkx, signer, deadline, signature } = await opts.managerSide({ cipherText, reserve, mistAddr });
     if (ukx !== managerUkx) throw new Error('Client and manager derived different ukx values');
     this.progress('Registering');
     const leaf = BigInt(await this.prover.hash2(mistAddr, ukx));
     await this.write(
       this.book.registrar,
-      encodeFunctionData({ abi: managerSigRegistrarAbi, functionName: 'registerUser', args: [reserve, leaf, signature] }),
+      encodeFunctionData({
+        abi: managerSigRegistrarAbi,
+        functionName: 'registerUser',
+        args: [reserve, leaf, deadline, signer, signature],
+      }),
       'registerUser',
     );
     this.ukx[`${reserve}:${mistAddr}`] = ukx;
@@ -434,41 +547,77 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
     return null;
   }
 
-  // ── Owner / manager admin ────────────────────────────────────────────────
+  // ── Chamber owner ────────────────────────────────────────────────────────
 
-  async registerReserve(manager: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      this.book.chamber,
-      encodeFunctionData({ abi: chamberAbi, functionName: 'registerReserve', args: [manager, keyHash, keyInputPoint] }),
-      'registerReserve',
-    );
-    return receipt;
+  /** Deploy and register a reserve with its admin (Chamber owner only). */
+  async registerReserve(admin: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
+    return this.send(this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName: 'registerReserve', args: [admin, keyHash, keyInputPoint] }), 'registerReserve');
   }
 
-  async setVerifier(verifier: Hex): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      this.book.chamber, encodeFunctionData({ abi: chamberAbi, functionName: 'setVerifier', args: [verifier] }), 'setVerifier',
-    );
-    return receipt;
+  // ── Reserve admin and permissions ────────────────────────────────────────
+
+  /** Whether `account` holds `role` on `reserve` (the admin holds them all). */
+  async hasPermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<boolean> {
+    return Boolean(await this.chain.readContract(reserve, 'hasPermission', [RESERVE_ROLES[role], account]));
+  }
+
+  /** Give `account` a permission on `reserve`. Admin only; the zero address reverts, a repeat grant is a no-op. */
+  async grantPermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'grantPermission', args: [RESERVE_ROLES[role], account] }), 'grantPermission');
   }
 
   /**
-   * Let `registrar` add members to `reserve` (`Reserve.setRegistrar`; reserve
-   * manager only). Defaults to `book.registrar`, the ManagerSigRegistrar that
-   * `join` registers through. The zero address closes registration.
+   * Take a granted permission back (never the admin's own). Admin only. It
+   * moves the account's epoch for the role, so a USERS revoke also voids
+   * every registrar signature that account made.
    */
-  async setRegistrar(reserve: Hex, registrar: Hex = this.book.registrar): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'setRegistrar', args: [registrar] }), 'setRegistrar',
-    );
-    return receipt;
+  async revokePermission(reserve: Hex, role: ReserveRole, account: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'revokePermission', args: [RESERVE_ROLES[role], account] }), 'revokePermission');
   }
 
+  /**
+   * Nominate `newAdmin`, who takes over with `acceptAdmin`; the zero address
+   * cancels. Admin only. Explicit grants survive the handover; the old
+   * admin's implicit permissions, and its registrar signatures, do not.
+   */
+  async transferAdmin(reserve: Hex, newAdmin: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'transferAdmin', args: [newAdmin] }), 'transferAdmin');
+  }
+
+  /** Become the reserve's admin. Only the nominated pending admin. */
+  async acceptAdmin(reserve: Hex): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'acceptAdmin' }), 'acceptAdmin');
+  }
+
+  /**
+   * List `asset` at `reserve` with a minimum deposit; zero delists it. Needs
+   * ASSETS. Nothing is depositable until listed.
+   */
+  async setAssetMinDeposit(reserve: Hex, asset: Hex, minDeposit: bigint): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'setAssetMinDeposit', args: [asset, minDeposit] }), 'setAssetMinDeposit');
+  }
+
+  /**
+   * Zero the user at `index` (from `UserRegistered`; see
+   * `registeredUserLeaves`). Needs USERS. Takes full effect within the
+   * Chamber's 10-minute zkState root grace; removing the last user reverts.
+   * It moves the leaf's nonce, so re-joining needs a new signature.
+   */
+  async removeUser(reserve: Hex, index: bigint): Promise<TxReceipt> {
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'removeUser', args: [index] }), 'removeUser');
+  }
+
+  /** Rotate the auditor key. Needs METADATA. */
   async updateAuditorKey(reserve: Hex, keyHash: bigint, keyInputPoint: bigint): Promise<TxReceipt> {
-    const { receipt } = await this.write(
-      reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'updateAuditorKey', args: [keyHash, keyInputPoint] }), 'updateAuditorKey',
-    );
-    return receipt;
+    return this.send(reserve, encodeFunctionData({ abi: reserveAbi, functionName: 'updateAuditorKey', args: [keyHash, keyInputPoint] }), 'updateAuditorKey');
+  }
+
+  /**
+   * Revoke every outstanding registrar signature, by any signer, for `leaf`
+   * at `reserve`. Needs USERS on `reserve`.
+   */
+  async revokeRegistration(reserve: Hex, leaf: bigint): Promise<TxReceipt> {
+    return this.send(this.book.registrar, encodeFunctionData({ abi: managerSigRegistrarAbi, functionName: 'revoke', args: [reserve, leaf] }), 'revoke');
   }
 
   // ── State helpers ────────────────────────────────────────────────────────
@@ -565,23 +714,85 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
   private async spendState(
     reserve: Hex,
     id: string,
-  ): Promise<NonNullable<SpendOpts['state']>> {
-    const [txLeaves, stateLeaves, reserveCfg, users] = await Promise.all([
-      this.chain.readContract(this.book.chamber, 'getTxArray'),
+  ): Promise<Omit<NonNullable<SpendOpts['state']>, 'txLeaves'>> {
+    const [stateLeaves, reserveCfg, users, userLeaves] = await Promise.all([
       this.zkStateLeaves(),
       this.chain.readContract(this.book.chamber, 'reserveConfigs', [reserve]),
       this.chain.readContract(reserve, 'registeredUsersCount'),
+      this.registeredUserLeaves(reserve),
     ]);
-    const userLeaves = await this.chain.getEvents?.(reserve, 'UserRegistered', 0n).then((evts) => evts.map((e) => String(e.args['leaf']))) ?? [];
     const owner = await this.ownerFor(id).catch(() => '0');
     return {
-      txLeaves: (txLeaves as bigint[]).map(String),
       stateLeaves,
       userLeaves,
       reserveConfig: String((reserveCfg as [bigint, bigint, bigint])[1] ?? reserveCfg),
       reserveUsers: BigInt(String(users)),
       ukx: this.ukx[`${reserve}:${owner}`] ?? '0',
     };
+  }
+
+  private capacity?: number;
+
+  /** Chamber's tx tree capacity (4^10 in production); kept once read. */
+  private async txTreeCapacity(): Promise<number> {
+    return (this.capacity ??= Number(await this.chain.readContract(this.book.chamber, 'txTreeCapacity')));
+  }
+
+  /**
+   * Set `note.txIndex` from its hash (`Chamber.noteIndexPlusOne`) when
+   * unknown. False when the note is in no tx tree.
+   */
+  private async locate(note: Note): Promise<boolean> {
+    if (note.txIndex === undefined && note.hash) {
+      const plusOne = BigInt((await this.chain.readContract(this.book.chamber, 'noteIndexPlusOne', [BigInt(note.hash)])) as bigint);
+      if (plusOne > 0n) note.txIndex = Number(plusOne - 1n);
+    }
+    return note.txIndex !== undefined;
+  }
+
+  /**
+   * Every leaf of tx tree `treeId`, the `txLeaves` a spend of its notes
+   * proves against, read through `getTxArray(offset, limit)` in pages of
+   * `TX_PAGE`, `TX_READS` at a time.
+   */
+  async txTreeLeaves(treeId: number): Promise<string[]> {
+    const [capacity, count] = await Promise.all([
+      this.txTreeCapacity(),
+      this.chain.readContract(this.book.chamber, 'txCount').then((n) => BigInt(n as bigint)),
+    ]);
+    const start = BigInt(treeId) * BigInt(capacity);
+    const treeEnd = start + BigInt(capacity);
+    const end = count < treeEnd ? count : treeEnd;
+    const pages: Array<[bigint, bigint]> = [];
+    for (let at = start; at < end; at += TX_PAGE) pages.push([at, end - at < TX_PAGE ? end - at : TX_PAGE]);
+    const leaves: string[] = [];
+    for (let i = 0; i < pages.length; i += TX_READS) {
+      const batch = await Promise.all(
+        pages.slice(i, i + TX_READS).map((args) => this.chain.readContract(this.book.chamber, 'getTxArray', args) as Promise<bigint[]>),
+      );
+      for (const page of batch) leaves.push(...page.map(String));
+    }
+    return leaves;
+  }
+
+  /**
+   * The reserve's registered-users leaves by index, with removed users zeroed
+   * as `Reserve.removeUser` leaves them: the `userLeaves` a spend proves
+   * against. Built from `UserRegistered` and `UserRemoved`, so it needs
+   * `ChainAdapter.getEvents` (empty without it); throws on a missing
+   * registration.
+   */
+  async registeredUserLeaves(reserve: Hex): Promise<string[]> {
+    if (!this.chain.getEvents) return [];
+    const [added, removed] = await Promise.all([
+      this.chain.getEvents(reserve, 'UserRegistered', 0n),
+      this.chain.getEvents(reserve, 'UserRemoved', 0n),
+    ]);
+    const leaves: string[] = [];
+    for (const { args } of added) leaves[Number(args['index'])] = String(args['leaf']);
+    for (const { args } of removed) leaves[Number(args['index'])] = '0';
+    if (Object.keys(leaves).length !== leaves.length) throw new Error(`MistClient: UserRegistered events are missing for reserve ${reserve}`);
+    return leaves;
   }
 
   async zkStateLeaves(): Promise<string[]> {
@@ -596,3 +807,9 @@ if (ukx !== '0' && (res.commitments?.length ?? 0) > 0) await this.recordUsedInde
 }
 
 const DEPOSIT_STATUS: DepositStatus[] = ['none', 'pending', 'rejected'];
+
+/** Leaves per `getTxArray` read: about 2.3M gas of storage reads, under common eth_call caps. */
+const TX_PAGE = 1024n;
+
+/** `getTxArray` reads in flight at once. */
+const TX_READS = 8;

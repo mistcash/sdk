@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, parseAbi } from 'viem';
+import { decodeFunctionData, parseAbi } from 'viem';
 import { MistClient } from '../src/client.js';
 import { SCREENING_ABI } from '../src/contracts.js';
 import type { ChainAdapter, Hex, SentTx } from '../src/types.js';
+import { depositQueuedLog, noteAppendedLog } from './helpers/chamber-logs.js';
 
 const BOOK = {
   chamber: '0x1111111111111111111111111111111111111111' as Hex,
@@ -17,20 +18,11 @@ const NOTE = 4242n;
 const SCREENING = parseAbi(SCREENING_ABI);
 
 /** A DepositQueued log as the Chamber emits it. */
-function queuedLog(depositId: bigint, address: Hex = BOOK.chamber) {
-  return {
-    address,
-    topics: encodeEventTopics({
-      abi: SCREENING,
-      eventName: 'DepositQueued',
-      args: { depositId, reserve: BOOK.reserve, depositor: ME },
-    }) as Hex[],
-    data: encodeAbiParameters(
-      [{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }],
-      [NOTE, BOOK.token, 100n],
-    ),
-  };
-}
+const queuedLog = (depositId: bigint, address: Hex = BOOK.chamber) =>
+  depositQueuedLog(address, { depositId, noteHash: NOTE, reserve: BOOK.reserve, depositor: ME, asset: BOOK.token, amount: 100n });
+
+/** A NoteAppended log: what an unscreened deposit emits instead. */
+const appendedLog = (index: bigint) => noteAppendedLog(BOOK.chamber, index, NOTE);
 
 /** Chain with one screened reserve and a mutable queue/tree. */
 function screenedChain(opts: { screener?: Hex; queue?: Record<string, number>; tree?: bigint[]; reverts?: boolean } = {}) {
@@ -47,13 +39,16 @@ function screenedChain(opts: { screener?: Hex; queue?: Record<string, number>; t
         const id = String(args?.[0]);
         return [ME, queue[id] ?? 0, BOOK.reserve, BOOK.token, 100n, NOTE];
       }
-      if (fn === 'getTxArray') return tree;
+      if (fn === 'noteIndexPlusOne') return BigInt(tree.indexOf(args?.[0] as bigint) + 1);
+      if (fn === 'reserveAssetMinDeposit') return 1n;
       return 0n;
     },
     sendTransaction: async (tx): Promise<SentTx> => {
       sent.push(tx);
       const isDeposit = tx.to === BOOK.chamber && sent.length === 2;
-      return { receipt: { transactionHash: '0xabc', logs: isDeposit ? [queuedLog(99n, BOOK.token), queuedLog(7n)] : [] }, result: NOTE };
+      const screened = !opts.reverts && BigInt(opts.screener ?? SCREENER) !== 0n;
+      const logs = !isDeposit ? [] : screened ? [queuedLog(99n, BOOK.token), queuedLog(7n)] : [appendedLog(3n)];
+      return { receipt: { transactionHash: '0xabc', logs } };
     },
   };
   return { chain, sent, queue, tree };
@@ -83,10 +78,20 @@ describe('deposit screening', () => {
     }
   });
 
+  it('isScreened reads the reserve screener, and says no on a Chamber without screening', async () => {
+    expect(await client(screenedChain().chain).isScreened(BOOK.reserve)).toBe(true);
+    expect(await client(screenedChain({ screener: '0x0000000000000000000000000000000000000000' }).chain).isScreened(BOOK.reserve)).toBe(false);
+    expect(await client(screenedChain({ reverts: true }).chain).isScreened(BOOK.reserve)).toBe(false);
+  });
+
   it('throws when a screened deposit receipt has no DepositQueued', async () => {
     const { chain } = screenedChain();
-    const c = client({ ...chain, sendTransaction: async () => ({ receipt: { transactionHash: '0xabc' } }) });
-    await expect(c.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(/DepositQueued/);
+    // The adapter passes logs, but none from the Chamber.
+    const c = client({ ...chain, sendTransaction: async () => ({ receipt: { transactionHash: '0xabc', logs: [] } }) });
+    await expect(c.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' })).rejects.toThrow(
+      'no NoteAppended or DepositQueued log',
+    );
+    expect(c.notes).toEqual([]);
   });
 
   it('reads a queue entry', async () => {
@@ -113,10 +118,29 @@ describe('deposit screening', () => {
     expect(note.screening).toBe('reclaimed');
 
     note.screening = 'pending';
-    env.tree.push(NOTE);
+    env.tree.push(1n, NOTE);
     await c.refreshScreening();
     expect(note.screening).toBeUndefined();
+    // Approval appended it at index 1, which fixes its tx tree.
+    expect(note.txIndex).toBe(1);
     expect(c.unspent(BOOK.reserve, 'alice')).toEqual([note]);
+  });
+
+  it('reads a rejected deposit that left the queue as reclaimed, even when its note is in the tree', async () => {
+    // Rejection is final. A duplicate of an approved note is rejected
+    // (DepositDuplicateRejected) while its twin's hash sits in the tree;
+    // once reclaimed, its funds are gone and it must not look approved.
+    const env = screenedChain({ queue: { '7': 2 } });
+    const c = client(env.chain);
+    const note = await c.deposit({ reserve: BOOK.reserve, id: 'alice', amount: 100n, blinding: '9' });
+    await c.refreshScreening();
+    expect(note.screening).toBe('rejected');
+
+    env.queue['7'] = 0;
+    env.tree.push(NOTE);
+    await c.refreshScreening();
+    expect(note.screening).toBe('reclaimed');
+    expect(c.unspent(BOOK.reserve, 'alice')).toEqual([]);
   });
 
   it('reclaims a deposit', async () => {
@@ -130,11 +154,14 @@ describe('deposit screening', () => {
     expect(note.screening).toBe('reclaimed');
   });
 
-  it('sets a reserve screener', async () => {
+  it('sets a reserve screener on the reserve, which pushes it to the Chamber', async () => {
+    // Chamber.setReserveScreener now accepts only a registered Reserve; a
+    // SCREENING holder calls Reserve.setScreener instead.
     const env = screenedChain();
     await client(env.chain).setReserveScreener(BOOK.reserve, SCREENER);
+    expect(env.sent[0].to).toBe(BOOK.reserve);
     expect(decodeFunctionData({ abi: SCREENING, data: env.sent[0].data })).toEqual({
-      functionName: 'setReserveScreener', args: [BOOK.reserve, SCREENER],
+      functionName: 'setScreener', args: [SCREENER],
     });
   });
 

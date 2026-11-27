@@ -17,11 +17,14 @@ function mockChain(seen: string[]): ChainAdapter {
       if (fn === 'zkStateLeaf') return 0n;
       if (fn === 'reserveConfigs') return [0n, 7n, 0n];
       if (fn === 'registeredUsersCount') return 0n;
+      if (fn === 'reserveAssetMinDeposit') return 1n;
+      if (fn === 'isValidZkStateRoot') return true;
       return 0n;
     },
     sendTransaction: async (tx) => {
       seen.push(tx.to);
-      return { receipt: { transactionHash: '0xabc' }, result: 42n };
+      // Chamber.deposit's (noteHash, depositId); other calls ignore it.
+      return { receipt: { transactionHash: '0xabc' }, result: [42n, 0n] };
     },
   };
 }
@@ -138,6 +141,7 @@ describe('MistClient', () => {
       await client.spend({
         id: 'alice',
         amount: 1n,
+        to: 'bob',
         reserve: BOOK.reserve,
         blindingA: '2',
         blindingB: '3',

@@ -20,6 +20,30 @@ describe('notes', () => {
     expect(pick([n(10n)], 50n)).toBeUndefined();
   });
 
+  it('never pairs notes from different tx trees', () => {
+    // Both inputs of a spend prove against one tx tree root, so a pair across
+    // trees cannot be spent. Trees of 4 here: indices 0-3, 4-7, ...
+    const at = (amount: bigint, txIndex: number): Note => ({ ...n(amount), txIndex });
+    const notes = [at(50n, 1), at(55n, 5), at(60n, 6)];
+    // Without trees the tightest pair is 50 + 55, but those sit in trees 0 and 1.
+    expect(pick(notes, 100n)?.map((x) => x.amount)).toEqual([50n, 55n]);
+    expect(pick(notes, 100n, 4)?.map((x) => x.amount)).toEqual([55n, 60n]);
+    // A lone note in tree 0 still covers on its own.
+    expect(pick([at(200n, 1), at(60n, 6)], 100n, 4)?.map((x) => x.txIndex)).toEqual([1]);
+    expect(pick([at(50n, 1), at(55n, 5)], 100n, 4)).toBeUndefined();
+  });
+
+  it('plans within one tx tree and names it', () => {
+    const at = (amount: bigint, txIndex?: number): Note => ({ ...n(amount), txIndex });
+    const base = { id: 'alice (MIST)', reserve: '0x01' as const, reserveUsers: 0n, isMember: false, txTreeCapacity: 4 };
+    expect(plan({ ...base, amount: 100n, notes: [at(50n, 1), at(55n, 5), at(60n, 6)] })).toMatchObject({ txTree: 1, change: 15n });
+    // A note with no known index is not in any tree yet: it cannot be proven.
+    expect(plan({ ...base, amount: 40n, notes: [at(100n)] })).toMatchObject({ error: 'Your notes here hold 0.' });
+    expect(plan({ ...base, amount: 100n, notes: [at(50n, 1), at(55n, 5)] })).toMatchObject({
+      error: 'A spend takes at most two notes from one tx tree and no two of yours cover this. Send some to yourself to merge them.',
+    });
+  });
+
   it('plans submitter routing and member gating', () => {
     const notes = [n(100n)];
     const ok = plan({ id: 'alice (MIST)', amount: 40n, reserve: '0x01', reserveUsers: 1n, isMember: true, notes });
